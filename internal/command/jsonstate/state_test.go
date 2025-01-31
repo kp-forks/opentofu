@@ -1,4 +1,6 @@
-// Copyright (c) HashiCorp, Inc.
+// Copyright (c) The OpenTofu Authors
+// SPDX-License-Identifier: MPL-2.0
+// Copyright (c) 2023 HashiCorp, Inc.
 // SPDX-License-Identifier: MPL-2.0
 
 package jsonstate
@@ -225,7 +227,7 @@ func TestMarshalResources(t *testing.T) {
 					Type:         "test_thing",
 					Name:         "bar",
 					Index:        nil,
-					ProviderName: "registry.terraform.io/hashicorp/test",
+					ProviderName: "registry.opentofu.org/hashicorp/test",
 					AttributeValues: AttributeValues{
 						"foozles": json.RawMessage(`null`),
 						"woozles": json.RawMessage(`"confuzles"`),
@@ -267,7 +269,7 @@ func TestMarshalResources(t *testing.T) {
 					Type:         "test_thing",
 					Name:         "bar",
 					Index:        nil,
-					ProviderName: "registry.terraform.io/hashicorp/test",
+					ProviderName: "registry.opentofu.org/hashicorp/test",
 					AttributeValues: AttributeValues{
 						"foozles": json.RawMessage(`"sensuzles"`),
 						"woozles": json.RawMessage(`"confuzles"`),
@@ -313,7 +315,7 @@ func TestMarshalResources(t *testing.T) {
 					Type:         "test_thing",
 					Name:         "bar",
 					Index:        nil,
-					ProviderName: "registry.terraform.io/hashicorp/test",
+					ProviderName: "registry.opentofu.org/hashicorp/test",
 					AttributeValues: AttributeValues{
 						"foozles": json.RawMessage(`"confuzles"`),
 						"woozles": json.RawMessage(`null`),
@@ -384,7 +386,7 @@ func TestMarshalResources(t *testing.T) {
 					Type:         "test_thing",
 					Name:         "bar",
 					Index:        json.RawMessage(`0`),
-					ProviderName: "registry.terraform.io/hashicorp/test",
+					ProviderName: "registry.opentofu.org/hashicorp/test",
 					AttributeValues: AttributeValues{
 						"foozles": json.RawMessage(`null`),
 						"woozles": json.RawMessage(`"confuzles"`),
@@ -426,7 +428,7 @@ func TestMarshalResources(t *testing.T) {
 					Type:         "test_thing",
 					Name:         "bar",
 					Index:        json.RawMessage(`"rockhopper"`),
-					ProviderName: "registry.terraform.io/hashicorp/test",
+					ProviderName: "registry.opentofu.org/hashicorp/test",
 					AttributeValues: AttributeValues{
 						"foozles": json.RawMessage(`null`),
 						"woozles": json.RawMessage(`"confuzles"`),
@@ -470,7 +472,7 @@ func TestMarshalResources(t *testing.T) {
 					Type:         "test_thing",
 					Name:         "bar",
 					Index:        nil,
-					ProviderName: "registry.terraform.io/hashicorp/test",
+					ProviderName: "registry.opentofu.org/hashicorp/test",
 					DeposedKey:   deposedKey.String(),
 					AttributeValues: AttributeValues{
 						"foozles": json.RawMessage(`null`),
@@ -519,7 +521,7 @@ func TestMarshalResources(t *testing.T) {
 					Type:         "test_thing",
 					Name:         "bar",
 					Index:        nil,
-					ProviderName: "registry.terraform.io/hashicorp/test",
+					ProviderName: "registry.opentofu.org/hashicorp/test",
 					AttributeValues: AttributeValues{
 						"foozles": json.RawMessage(`null`),
 						"woozles": json.RawMessage(`"confuzles"`),
@@ -532,7 +534,7 @@ func TestMarshalResources(t *testing.T) {
 					Type:         "test_thing",
 					Name:         "bar",
 					Index:        nil,
-					ProviderName: "registry.terraform.io/hashicorp/test",
+					ProviderName: "registry.opentofu.org/hashicorp/test",
 					DeposedKey:   deposedKey.String(),
 					AttributeValues: AttributeValues{
 						"foozles": json.RawMessage(`null`),
@@ -579,7 +581,7 @@ func TestMarshalResources(t *testing.T) {
 					Type:         "test_map_attr",
 					Name:         "bar",
 					Index:        nil,
-					ProviderName: "registry.terraform.io/hashicorp/test",
+					ProviderName: "registry.opentofu.org/hashicorp/test",
 					AttributeValues: AttributeValues{
 						"data": json.RawMessage(`{"woozles":"confuzles"}`),
 					},
@@ -629,6 +631,7 @@ func TestMarshalModules_basic(t *testing.T) {
 				Provider: addrs.NewDefaultProvider("test"),
 				Module:   addrs.RootModule,
 			},
+			addrs.NoKey,
 		)
 		s.SetResourceInstanceCurrent(
 			addrs.Resource{
@@ -644,6 +647,7 @@ func TestMarshalModules_basic(t *testing.T) {
 				Provider: addrs.NewDefaultProvider("test"),
 				Module:   childModule.Module(),
 			},
+			addrs.NoKey,
 		)
 		s.SetResourceInstanceCurrent(
 			addrs.Resource{
@@ -659,6 +663,7 @@ func TestMarshalModules_basic(t *testing.T) {
 				Provider: addrs.NewDefaultProvider("test"),
 				Module:   subModule.Module(),
 			},
+			addrs.NoKey,
 		)
 	})
 	moduleMap := make(map[string][]addrs.ModuleInstance)
@@ -698,6 +703,7 @@ func TestMarshalModules_nested(t *testing.T) {
 				Provider: addrs.NewDefaultProvider("test"),
 				Module:   addrs.RootModule,
 			},
+			addrs.NoKey,
 		)
 		s.SetResourceInstanceCurrent(
 			addrs.Resource{
@@ -713,6 +719,7 @@ func TestMarshalModules_nested(t *testing.T) {
 				Provider: addrs.NewDefaultProvider("test"),
 				Module:   childModule.Module(),
 			},
+			addrs.NoKey,
 		)
 		s.SetResourceInstanceCurrent(
 			addrs.Resource{
@@ -728,6 +735,7 @@ func TestMarshalModules_nested(t *testing.T) {
 				Provider: addrs.NewDefaultProvider("test"),
 				Module:   subModule.Module(),
 			},
+			addrs.NoKey,
 		)
 	})
 	moduleMap := make(map[string][]addrs.ModuleInstance)
@@ -770,6 +778,7 @@ func TestMarshalModules_parent_no_resources(t *testing.T) {
 				Provider: addrs.NewDefaultProvider("test"),
 				Module:   addrs.RootModule,
 			},
+			addrs.NoKey,
 		)
 		s.SetResourceInstanceCurrent(
 			addrs.Resource{
@@ -785,6 +794,7 @@ func TestMarshalModules_parent_no_resources(t *testing.T) {
 				Provider: addrs.NewDefaultProvider("test"),
 				Module:   subModule.Module(),
 			},
+			addrs.NoKey,
 		)
 	})
 	got, err := marshalRootModule(testState, testSchemas())
@@ -1044,6 +1054,213 @@ func TestSensitiveAsBool(t *testing.T) {
 
 	for _, test := range tests {
 		got := SensitiveAsBool(test.Input)
+		if !reflect.DeepEqual(got, test.Want) {
+			t.Errorf(
+				"wrong result\ninput: %#v\ngot:   %#v\nwant:  %#v",
+				test.Input, got, test.Want,
+			)
+		}
+	}
+}
+
+func TestSensitiveAsBoolWithPathValueMarks(t *testing.T) {
+	tests := []struct {
+		Input cty.Value
+		Pvms  []cty.PathValueMarks
+		Want  cty.Value
+	}{
+		{
+			cty.ListVal([]cty.Value{
+				cty.StringVal("hello"),
+				cty.StringVal("friend"),
+			}),
+			[]cty.PathValueMarks{{
+				Path:  cty.Path{cty.IndexStep{Key: cty.NumberIntVal(1)}},
+				Marks: cty.NewValueMarks(marks.Sensitive)},
+			},
+			cty.TupleVal([]cty.Value{
+				cty.False,
+				cty.True,
+			}),
+		},
+		{
+			cty.ListVal([]cty.Value{
+				cty.StringVal("hello").Mark(marks.Sensitive),
+				cty.StringVal("friend"),
+			}),
+			[]cty.PathValueMarks{{
+				Path:  cty.Path{cty.IndexStep{Key: cty.NumberIntVal(1)}},
+				Marks: cty.NewValueMarks(marks.Sensitive)},
+			},
+			cty.TupleVal([]cty.Value{
+				cty.True,
+				cty.True,
+			}),
+		},
+		{
+			cty.TupleVal([]cty.Value{
+				cty.StringVal("hello"),
+				cty.StringVal("friend"),
+			}),
+			[]cty.PathValueMarks{{
+				Path:  cty.Path{cty.IndexStep{Key: cty.NumberIntVal(1)}},
+				Marks: cty.NewValueMarks(marks.Sensitive)},
+			},
+			cty.TupleVal([]cty.Value{
+				cty.False,
+				cty.True,
+			}),
+		},
+		{
+			cty.TupleVal([]cty.Value{
+				cty.StringVal("hello").Mark(marks.Sensitive),
+				cty.StringVal("friend"),
+			}),
+			[]cty.PathValueMarks{{
+				Path:  cty.Path{cty.IndexStep{Key: cty.NumberIntVal(1)}},
+				Marks: cty.NewValueMarks(marks.Sensitive)},
+			},
+			cty.TupleVal([]cty.Value{
+				cty.True,
+				cty.True,
+			}),
+		},
+		{
+			cty.SetVal([]cty.Value{
+				cty.StringVal("hello"),
+				cty.StringVal("friend"),
+			}),
+			[]cty.PathValueMarks{{
+				Path:  cty.Path{cty.IndexStep{Key: cty.StringVal("hello")}},
+				Marks: cty.NewValueMarks(marks.Sensitive)},
+			},
+			cty.TupleVal([]cty.Value{
+				cty.False,
+				cty.True,
+			}),
+		},
+		{
+			cty.MapVal(map[string]cty.Value{
+				"greeting": cty.StringVal("hello"),
+				"animal":   cty.StringVal("horse"),
+			}),
+			[]cty.PathValueMarks{{
+				Path:  cty.Path{cty.IndexStep{Key: cty.StringVal("animal")}},
+				Marks: cty.NewValueMarks(marks.Sensitive)},
+			},
+			cty.ObjectVal(map[string]cty.Value{
+				"animal": cty.True,
+			}),
+		},
+		{
+			cty.ObjectVal(map[string]cty.Value{
+				"greeting": cty.StringVal("hello"),
+				"animal":   cty.StringVal("horse"),
+			}),
+			[]cty.PathValueMarks{{
+				Path:  cty.Path{cty.GetAttrStep{Name: "animal"}},
+				Marks: cty.NewValueMarks(marks.Sensitive)},
+			},
+			cty.ObjectVal(map[string]cty.Value{
+				"animal": cty.True,
+			}),
+		},
+		{
+			cty.ListVal([]cty.Value{
+				cty.ObjectVal(map[string]cty.Value{
+					"a": cty.UnknownVal(cty.String),
+				}),
+				cty.ObjectVal(map[string]cty.Value{
+					"a": cty.StringVal("known"),
+				}),
+			}),
+			[]cty.PathValueMarks{{
+				Path:  cty.Path{cty.IndexStep{Key: cty.NumberIntVal(1)}, cty.GetAttrStep{Name: "a"}},
+				Marks: cty.NewValueMarks(marks.Sensitive)},
+			},
+
+			cty.TupleVal([]cty.Value{
+				cty.EmptyObjectVal,
+				cty.ObjectVal(map[string]cty.Value{
+					"a": cty.True,
+				}),
+			}),
+		},
+		{
+			cty.TupleVal([]cty.Value{
+				cty.ObjectVal(map[string]cty.Value{
+					"a": cty.UnknownVal(cty.String),
+				}),
+				cty.ObjectVal(map[string]cty.Value{
+					"a": cty.StringVal("known"),
+				}),
+			}),
+			[]cty.PathValueMarks{{
+				Path:  cty.Path{cty.IndexStep{Key: cty.NumberIntVal(1)}, cty.GetAttrStep{Name: "a"}},
+				Marks: cty.NewValueMarks(marks.Sensitive)},
+			},
+
+			cty.TupleVal([]cty.Value{
+				cty.EmptyObjectVal,
+				cty.ObjectVal(map[string]cty.Value{
+					"a": cty.True,
+				}),
+			}),
+		},
+		{
+			cty.ListVal([]cty.Value{
+				cty.MapValEmpty(cty.String),
+				cty.MapVal(map[string]cty.Value{
+					"a": cty.StringVal("known"),
+				}),
+				cty.MapVal(map[string]cty.Value{
+					"a": cty.UnknownVal(cty.String),
+				}),
+			}),
+			[]cty.PathValueMarks{{
+				Path:  cty.Path{cty.IndexStep{Key: cty.NumberIntVal(1)}, cty.IndexStep{Key: cty.StringVal("a")}},
+				Marks: cty.NewValueMarks(marks.Sensitive)},
+			},
+			cty.TupleVal([]cty.Value{
+				cty.EmptyObjectVal,
+				cty.ObjectVal(map[string]cty.Value{
+					"a": cty.True,
+				}),
+				cty.EmptyObjectVal,
+			}),
+		},
+		{
+			cty.SetVal([]cty.Value{
+				cty.ObjectVal(map[string]cty.Value{
+					"greeting": cty.StringVal("hello"),
+					"animal":   cty.StringVal("cat"),
+				}),
+				cty.ObjectVal(map[string]cty.Value{
+					"greeting": cty.StringVal("hello"),
+					"animal":   cty.StringVal("horse"),
+				}),
+			}),
+			[]cty.PathValueMarks{{
+				Path: cty.Path{
+					cty.IndexStep{Key: cty.ObjectVal(map[string]cty.Value{
+						"greeting": cty.StringVal("hello"),
+						"animal":   cty.StringVal("cat"),
+					})},
+					cty.GetAttrStep{Name: "animal"}},
+				Marks: cty.NewValueMarks(marks.Sensitive)},
+			},
+
+			cty.TupleVal([]cty.Value{
+				cty.ObjectVal(map[string]cty.Value{
+					"animal": cty.True,
+				}),
+				cty.EmptyObjectVal,
+			}),
+		},
+	}
+
+	for _, test := range tests {
+		got := SensitiveAsBoolWithPathValueMarks(test.Input, test.Pvms)
 		if !reflect.DeepEqual(got, test.Want) {
 			t.Errorf(
 				"wrong result\ninput: %#v\ngot:   %#v\nwant:  %#v",

@@ -22,7 +22,10 @@ on:
         type: string
       package-name:
         type: string
-        default: opentofu
+        default: tofu
+      bin-name:
+        type: string
+        default: tofu
       product-version:
         type: string
         required: true
@@ -38,8 +41,8 @@ jobs:
     runs-on: ${{ inputs.runson }}
     name: OpenTofu ${{ inputs.goos }} ${{ inputs.goarch }} v${{ inputs.product-version }}
     steps:
-      - uses: actions/checkout@c85c95e3d7251135ab7dc9ce3241c5835cc595a9 # v3.5.3
-      - uses: actions/setup-go@fac708d6674e30b6ba41289acaab6d4b75aa0753 # v4.0.1
+      - uses: actions/checkout@0ad4b8fadaa221de15dcec353f45205ec38ea70b # v4.1.4
+      - uses: actions/setup-go@cdcb36043654635271a94b9a6d1392de5bb323a7 # v5.0.1
         with:
           go-version: ${{ inputs.go-version }}
       - name: Determine artifact basename
@@ -53,7 +56,8 @@ jobs:
           CGO_ENABLED: ${{ inputs.cgo-enabled }}
         uses: hashicorp/actions-go-build@v0.1.7
         with:
-          product_name: ${{ inputs.package-name }}
+          bin_name: ${{ inputs.bin-name }}
+          product_name: ${{ inputs.product-name }}
           product_version: ${{ inputs.product-version }}
           go_version: ${{ inputs.go-version }}
           os: ${{ inputs.goos }}
@@ -62,7 +66,7 @@ jobs:
           instructions: |-
             mkdir dist out
             set -x
-            go build -ldflags "${{ inputs.ld-flags }}" -o dist/ .
+            go build -ldflags "${{ inputs.ld-flags }}" -o dist/ ./cmd/tofu
             zip -r -j out/${{ env.ARTIFACT_BASENAME }} dist/
       - uses: actions/upload-artifact@0b7f8abb1508181956e8e162db84b466c27e18ce # v3.1.2
         with:

@@ -2,21 +2,21 @@
 
 This directory contains the portions of [the OpenTofu website](https://opentofu.org) that pertain to the core functionality, excluding providers and the overall configuration.
 
+## Development server
+
+You can start a local development server with Docker by running the following command from this (the `website`) directory:
+
+```
+docker compose up --build
+```
+
+The development server will be available on http://localhost:3000/ .
+
 ## Suggesting Changes
 
 You can [submit an issue](https://github.com/opentofu/opentofu/issues/new/choose) with documentation requests or submit a pull request with suggested changes.
 
 Click **Edit this page** at the bottom of any OpenTofu website page to go directly to the associated markdown file in GitHub.
-
-## Validating Content
-
-Content changes are automatically validated against a set of rules as part of the pull request process. If you want to run these checks locally to validate your content before committing your changes, you can run the following command:
-
-```
-npm run content-check
-```
-
-If the validation fails, actionable error messages will be displayed to help you address detected issues.
 
 ## Modifying Sidebar Navigation
 
@@ -30,8 +30,10 @@ To update the sidebar navigation, you must edit the appropriate `nav-data.json` 
 
 ## Previewing Changes
 
-Coming soon: Documenting the development process for the documentation website repo.
+Currently, you can preview your changes through the [opentofu/opentofu.org](https://github.com/opentofu/opentofu.org/blob/main/README.md) repository.
 
-## Deploying Changes
+Follow the [Getting Started](https://github.com/opentofu/opentofu.org/blob/main/README.md#getting-started) guide.
 
-Coming soon: Documenting the deployment process for the documentation website repo.
+## Copyright headers for code examples
+
+In order to not include copyright headers for code examples used in docs, please, add the files under `examples` folder. This way, it will be ignored on automated copyright headers check.

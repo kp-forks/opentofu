@@ -61,7 +61,7 @@ type MockLauncher struct {
 	// would naturally complete.
 	Context context.Context
 
-	// Responses is a log of all of the responses recieved from the launcher's
+	// Responses is a log of all of the responses received from the launcher's
 	// requests, in the order requested.
 	Responses []*http.Response
 
@@ -107,12 +107,12 @@ func (l *MockLauncher) openURL(u string) error {
 		log.Printf("[DEBUG] webbrowser.MockLauncher: requesting %s", u)
 		req, err := http.NewRequest("GET", u, nil)
 		if err != nil {
-			return fmt.Errorf("failed to construct HTTP request for %s: %s", u, err)
+			return fmt.Errorf("failed to construct HTTP request for %s: %w", u, err)
 		}
 		resp, err := l.Client.Do(req)
 		if err != nil {
 			log.Printf("[DEBUG] webbrowser.MockLauncher: request failed: %s", err)
-			return fmt.Errorf("error requesting %s: %s", u, err)
+			return fmt.Errorf("error requesting %s: %w", u, err)
 		}
 		l.Responses = append(l.Responses, resp)
 		if resp.StatusCode >= 400 {
@@ -135,7 +135,7 @@ func (l *MockLauncher) openURL(u string) error {
 			oldURL := resp.Request.URL
 			givenURL, err := url.Parse(u)
 			if err != nil {
-				return fmt.Errorf("invalid redirect URL %s: %s", u, err)
+				return fmt.Errorf("invalid redirect URL %s: %w", u, err)
 			}
 			u = oldURL.ResolveReference(givenURL).String()
 			log.Printf("[DEBUG] webbrowser.MockLauncher: redirected to %s", u)

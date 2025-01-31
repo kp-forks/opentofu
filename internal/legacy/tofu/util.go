@@ -1,4 +1,6 @@
-// Copyright (c) HashiCorp, Inc.
+// Copyright (c) The OpenTofu Authors
+// SPDX-License-Identifier: MPL-2.0
+// Copyright (c) 2023 HashiCorp, Inc.
 // SPDX-License-Identifier: MPL-2.0
 
 package tofu
@@ -47,17 +49,6 @@ func (s Semaphore) Release() {
 	default:
 		panic("release without an acquire")
 	}
-}
-
-// strSliceContains checks if a given string is contained in a slice
-// When anybody asks why Go needs generics, here you go.
-func strSliceContains(haystack []string, needle string) bool {
-	for _, s := range haystack {
-		if s == needle {
-			return true
-		}
-	}
-	return false
 }
 
 // deduplicate a slice of strings

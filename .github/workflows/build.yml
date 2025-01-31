@@ -16,7 +16,7 @@ on:
       - 'v[0-9]+.[0-9]+.[0-9]+*'
 
 env:
-  PKG_NAME: "opentofu"
+  PKG_NAME: "tofu"
 
 permissions:
   contents: read
@@ -35,7 +35,7 @@ jobs:
       pkg-name: ${{ steps.get-pkg-name.outputs.pkg-name }}
 
     steps:
-      - uses: actions/checkout@c85c95e3d7251135ab7dc9ce3241c5835cc595a9 # v3.5.3
+      - uses: actions/checkout@0ad4b8fadaa221de15dcec353f45205ec38ea70b # v4.1.4
       - name: Get Package Name
         id: get-pkg-name
         run: |
@@ -62,7 +62,7 @@ jobs:
       go-version: ${{ steps.get-go-version.outputs.version }}
 
     steps:
-      - uses: actions/checkout@c85c95e3d7251135ab7dc9ce3241c5835cc595a9 # v3.5.3
+      - uses: actions/checkout@0ad4b8fadaa221de15dcec353f45205ec38ea70b # v4.1.4
       - name: Determine Go version
         id: get-go-version
         uses: ./.github/actions/go-version
@@ -75,7 +75,7 @@ jobs:
       filepath: ${{ steps.generate-metadata-file.outputs.filepath }}
 
     steps:
-      - uses: actions/checkout@c85c95e3d7251135ab7dc9ce3241c5835cc595a9 # v3.5.3
+      - uses: actions/checkout@0ad4b8fadaa221de15dcec353f45205ec38ea70b # v4.1.4
       - name: Generate package metadata
         id: generate-metadata-file
         uses: hashicorp/actions-generate-metadata@v1
@@ -137,7 +137,7 @@ jobs:
       repo: "opentofu"
       version: ${{needs.get-product-version.outputs.product-version}}
     steps:
-      - uses: actions/checkout@c85c95e3d7251135ab7dc9ce3241c5835cc595a9 # v3.5.3
+      - uses: actions/checkout@0ad4b8fadaa221de15dcec353f45205ec38ea70b # v4.1.4
       - name: Build Docker images
         uses: hashicorp/actions-docker-build@v1
         with:
@@ -185,10 +185,10 @@ jobs:
           cache_path=internal/command/e2etest/build
           echo "e2e-cache-key=${cache_key}" | tee -a "${GITHUB_OUTPUT}"
           echo "e2e-cache-path=${cache_path}" | tee -a "${GITHUB_OUTPUT}"
-      - uses: actions/checkout@c85c95e3d7251135ab7dc9ce3241c5835cc595a9 # v3.5.3
+      - uses: actions/checkout@0ad4b8fadaa221de15dcec353f45205ec38ea70b # v4.1.4
 
       - name: Install Go toolchain
-        uses: actions/setup-go@fac708d6674e30b6ba41289acaab6d4b75aa0753 # v4.0.1
+        uses: actions/setup-go@cdcb36043654635271a94b9a6d1392de5bb323a7 # v5.0.1
         with:
           go-version: ${{ needs.get-go-version.outputs.go-version }}
 
@@ -243,7 +243,7 @@ jobs:
       # fresh build from source.)
       - name: Checkout repo
         if: ${{ (matrix.goos == 'linux') || (matrix.goos == 'darwin') }}
-        uses: actions/checkout@c85c95e3d7251135ab7dc9ce3241c5835cc595a9 # v3.5.3
+        uses: actions/checkout@0ad4b8fadaa221de15dcec353f45205ec38ea70b # v4.1.4
       - name: "Restore cache"
         uses: actions/cache/restore@88522ab9f39a2ea568f7027eddc7d8d8bc9d59c8 # v3.3.1
         id: e2etestpkg
@@ -256,13 +256,13 @@ jobs:
         uses: actions/download-artifact@9bc31d5ccc31df68ecc42ccf4149144866c47d8a # v3.0.2
         id: clipkg
         with:
-          name: opentofu_${{env.version}}_${{ env.os }}_${{ env.arch }}.zip
+          name: tofu_${{env.version}}_${{ env.os }}_${{ env.arch }}.zip
           path: .
       - name: Extract packages
         if: ${{ matrix.goos == 'windows' }}
         run: |
           unzip "${{ needs.e2etest-build.outputs.e2e-cache-path }}/tofu-e2etest_${{ env.os }}_${{ env.arch }}.zip"
-          unzip "./opentofu_${{env.version}}_${{ env.os }}_${{ env.arch }}.zip"
+          unzip "./tofu_${{env.version}}_${{ env.os }}_${{ env.arch }}.zip"
       - name: Set up QEMU
         uses: docker/setup-qemu-action@2b82ce82d56a2a04d2637cd93a637ae1b359c0a7 # v2.2.0
         if: ${{ contains(matrix.goarch, 'arm') }}
@@ -298,24 +298,24 @@ jobs:
 
     steps:
       - name: Install Go toolchain
-        uses: actions/setup-go@fac708d6674e30b6ba41289acaab6d4b75aa0753 # v4.0.1
+        uses: actions/setup-go@cdcb36043654635271a94b9a6d1392de5bb323a7 # v5.0.1
         with:
           go-version: ${{ needs.get-go-version.outputs.go-version }}
       - name: Download OpenTofu CLI package
         uses: actions/download-artifact@9bc31d5ccc31df68ecc42ccf4149144866c47d8a # v3.0.2
         id: clipkg
         with:
-          name: opentofu_${{ env.version }}_linux_amd64.zip
+          name: tofu_${{ env.version }}_linux_amd64.zip
           path: .
       - name: Checkout tofu-exec repo
-        uses: actions/checkout@c85c95e3d7251135ab7dc9ce3241c5835cc595a9 # v3.5.3
+        uses: actions/checkout@0ad4b8fadaa221de15dcec353f45205ec38ea70b # v4.1.4
         with:
-          repository: hashicorp/terraform-exec
+          repository: opentofu/tofu-exec
           path: tofu-exec
       - name: Run tofu-exec end-to-end tests
         run: |
           FULL_RELEASE_VERSION="${{ env.version }}"
-          unzip opentofu_${FULL_RELEASE_VERSION}_linux_amd64.zip
+          unzip tofu_${FULL_RELEASE_VERSION}_linux_amd64.zip
           export TFEXEC_E2ETEST_TERRAFORM_PATH="$(pwd)/tofu"
           cd tofu-exec
           go test -race -timeout=30m -v ./tfexec/internal/e2etest

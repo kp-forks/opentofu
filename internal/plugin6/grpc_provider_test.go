@@ -1,4 +1,6 @@
-// Copyright (c) HashiCorp, Inc.
+// Copyright (c) The OpenTofu Authors
+// SPDX-License-Identifier: MPL-2.0
+// Copyright (c) 2023 HashiCorp, Inc.
 // SPDX-License-Identifier: MPL-2.0
 
 package plugin6
@@ -8,15 +10,16 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/golang/mock/gomock"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
+	"github.com/zclconf/go-cty/cty"
+	"go.uber.org/mock/gomock"
+
+	"github.com/opentofu/opentofu/internal/addrs"
 	"github.com/opentofu/opentofu/internal/configs/hcl2shim"
+	mockproto "github.com/opentofu/opentofu/internal/plugin6/mock_proto"
 	"github.com/opentofu/opentofu/internal/providers"
 	"github.com/opentofu/opentofu/internal/tfdiags"
-	"github.com/zclconf/go-cty/cty"
-
-	mockproto "github.com/opentofu/opentofu/internal/plugin6/mock_proto"
 	proto "github.com/opentofu/opentofu/internal/tfplugin6"
 )
 
@@ -99,6 +102,25 @@ func providerProtoSchema() *proto.GetProviderSchema_Response {
 				},
 			},
 		},
+		Functions: map[string]*proto.Function{
+			"fn": &proto.Function{
+				Parameters: []*proto.Function_Parameter{{
+					Name:               "par_a",
+					Type:               []byte(`"string"`),
+					AllowNullValue:     false,
+					AllowUnknownValues: false,
+				}},
+				VariadicParameter: &proto.Function_Parameter{
+					Name:               "par_var",
+					Type:               []byte(`"string"`),
+					AllowNullValue:     true,
+					AllowUnknownValues: false,
+				},
+				Return: &proto.Function_Return{
+					Type: []byte(`"string"`),
+				},
+			},
+		},
 	}
 }
 
@@ -161,6 +183,100 @@ func TestGRPCProvider_GetSchema_ResponseErrorDiagnostic(t *testing.T) {
 	resp := p.GetProviderSchema()
 
 	checkDiagsHasError(t, resp.Diagnostics)
+}
+
+func TestGRPCProvider_GetSchema_GlobalCacheEnabled(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	client := mockproto.NewMockProviderClient(ctrl)
+	// The SchemaCache is global and is saved between test runs
+	providers.SchemaCache = providers.NewMockSchemaCache()
+
+	providerAddr := addrs.Provider{
+		Namespace: "namespace",
+		Type:      "type",
+	}
+
+	mockedProviderResponse := &proto.Schema{Version: 2, Block: &proto.Schema_Block{}}
+
+	client.EXPECT().GetProviderSchema(
+		gomock.Any(),
+		gomock.Any(),
+		gomock.Any(),
+	).Times(1).Return(&proto.GetProviderSchema_Response{
+		Provider:           mockedProviderResponse,
+		ServerCapabilities: &proto.ServerCapabilities{GetProviderSchemaOptional: true},
+	}, nil)
+
+	// Run GetProviderTwice, expect GetSchema to be called once
+	// Re-initialize the provider before each run to avoid usage of the local cache
+	p := &GRPCProvider{
+		client: client,
+		Addr:   providerAddr,
+	}
+	resp := p.GetProviderSchema()
+
+	checkDiags(t, resp.Diagnostics)
+	if !cmp.Equal(resp.Provider.Version, mockedProviderResponse.Version) {
+		t.Fatal(cmp.Diff(resp.Provider.Version, mockedProviderResponse.Version))
+	}
+
+	p = &GRPCProvider{
+		client: client,
+		Addr:   providerAddr,
+	}
+	resp = p.GetProviderSchema()
+
+	checkDiags(t, resp.Diagnostics)
+	if !cmp.Equal(resp.Provider.Version, mockedProviderResponse.Version) {
+		t.Fatal(cmp.Diff(resp.Provider.Version, mockedProviderResponse.Version))
+	}
+}
+
+func TestGRPCProvider_GetSchema_GlobalCacheDisabled(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	client := mockproto.NewMockProviderClient(ctrl)
+	// The SchemaCache is global and is saved between test runs
+	providers.SchemaCache = providers.NewMockSchemaCache()
+
+	providerAddr := addrs.Provider{
+		Namespace: "namespace",
+		Type:      "type",
+	}
+
+	mockedProviderResponse := &proto.Schema{Version: 2, Block: &proto.Schema_Block{}}
+
+	client.EXPECT().GetProviderSchema(
+		gomock.Any(),
+		gomock.Any(),
+		gomock.Any(),
+	).Times(2).Return(&proto.GetProviderSchema_Response{
+		Provider:           mockedProviderResponse,
+		ServerCapabilities: &proto.ServerCapabilities{GetProviderSchemaOptional: false},
+	}, nil)
+
+	// Run GetProviderTwice, expect GetSchema to be called once
+	// Re-initialize the provider before each run to avoid usage of the local cache
+	p := &GRPCProvider{
+		client: client,
+		Addr:   providerAddr,
+	}
+	resp := p.GetProviderSchema()
+
+	checkDiags(t, resp.Diagnostics)
+	if !cmp.Equal(resp.Provider.Version, mockedProviderResponse.Version) {
+		t.Fatal(cmp.Diff(resp.Provider.Version, mockedProviderResponse.Version))
+	}
+
+	p = &GRPCProvider{
+		client: client,
+		Addr:   providerAddr,
+	}
+	resp = p.GetProviderSchema()
+
+	checkDiags(t, resp.Diagnostics)
+	if !cmp.Equal(resp.Provider.Version, mockedProviderResponse.Version) {
+		t.Fatal(cmp.Diff(resp.Provider.Version, mockedProviderResponse.Version))
+	}
 }
 
 func TestGRPCProvider_PrepareProviderConfig(t *testing.T) {
@@ -783,5 +899,31 @@ func TestGRPCProvider_ReadDataSourceJSON(t *testing.T) {
 
 	if !cmp.Equal(expected, resp.State, typeComparer, valueComparer, equateEmpty) {
 		t.Fatal(cmp.Diff(expected, resp.State, typeComparer, valueComparer, equateEmpty))
+	}
+}
+
+func TestGRPCProvider_CallFunction(t *testing.T) {
+	client := mockProviderClient(t)
+	p := &GRPCProvider{
+		client: client,
+	}
+
+	client.EXPECT().CallFunction(
+		gomock.Any(),
+		gomock.Any(),
+	).Return(&proto.CallFunction_Response{
+		Result: &proto.DynamicValue{Json: []byte(`"foo"`)},
+	}, nil)
+
+	resp := p.CallFunction(providers.CallFunctionRequest{
+		Name:      "fn",
+		Arguments: []cty.Value{cty.StringVal("bar"), cty.NilVal},
+	})
+
+	if resp.Error != nil {
+		t.Fatal(resp.Error)
+	}
+	if resp.Result != cty.StringVal("foo") {
+		t.Fatalf("%v", resp.Result)
 	}
 }

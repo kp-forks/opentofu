@@ -1,4 +1,6 @@
-// Copyright (c) HashiCorp, Inc.
+// Copyright (c) The OpenTofu Authors
+// SPDX-License-Identifier: MPL-2.0
+// Copyright (c) 2023 HashiCorp, Inc.
 // SPDX-License-Identifier: MPL-2.0
 
 package command
@@ -33,6 +35,7 @@ func TestStateMv(t *testing.T) {
 				Provider: addrs.NewDefaultProvider("test"),
 				Module:   addrs.RootModule,
 			},
+			addrs.NoKey,
 		)
 		s.SetResourceInstanceCurrent(
 			addrs.Resource{
@@ -49,6 +52,7 @@ func TestStateMv(t *testing.T) {
 				Provider: addrs.NewDefaultProvider("test"),
 				Module:   addrs.RootModule,
 			},
+			addrs.NoKey,
 		)
 	})
 	statePath := testStateFile(t, state)
@@ -169,6 +173,7 @@ func TestStateMv_backupAndBackupOutOptionsWithNonLocalBackend(t *testing.T) {
 				Provider: addrs.NewDefaultProvider("test"),
 				Module:   addrs.RootModule,
 			},
+			addrs.NoKey,
 		)
 	})
 
@@ -416,6 +421,7 @@ func TestStateMv_resourceToInstance(t *testing.T) {
 				Provider: addrs.NewDefaultProvider("test"),
 				Module:   addrs.RootModule,
 			},
+			addrs.NoKey,
 		)
 		s.SetResourceInstanceCurrent(
 			addrs.Resource{
@@ -432,6 +438,7 @@ func TestStateMv_resourceToInstance(t *testing.T) {
 				Provider: addrs.NewDefaultProvider("test"),
 				Module:   addrs.RootModule,
 			},
+			addrs.NoKey,
 		)
 		s.SetResourceProvider(
 			addrs.Resource{
@@ -473,12 +480,12 @@ func TestStateMv_resourceToInstance(t *testing.T) {
 	testStateOutput(t, statePath, `
 test_instance.bar.0:
   ID = bar
-  provider = provider["registry.terraform.io/hashicorp/test"]
+  provider = provider["registry.opentofu.org/hashicorp/test"]
   bar = value
   foo = value
 test_instance.baz:
   ID = foo
-  provider = provider["registry.terraform.io/hashicorp/test"]
+  provider = provider["registry.opentofu.org/hashicorp/test"]
   bar = value
   foo = value
 `)
@@ -507,6 +514,7 @@ func TestStateMv_resourceToInstanceErr(t *testing.T) {
 				Provider: addrs.NewDefaultProvider("test"),
 				Module:   addrs.RootModule,
 			},
+			addrs.NoKey,
 		)
 		s.SetResourceProvider(
 			addrs.Resource{
@@ -576,6 +584,7 @@ func TestStateMv_resourceToInstanceErrInAutomation(t *testing.T) {
 				Provider: addrs.NewDefaultProvider("test"),
 				Module:   addrs.RootModule,
 			},
+			addrs.NoKey,
 		)
 		s.SetResourceProvider(
 			addrs.Resource{
@@ -646,6 +655,7 @@ func TestStateMv_instanceToResource(t *testing.T) {
 				Provider: addrs.NewDefaultProvider("test"),
 				Module:   addrs.RootModule,
 			},
+			addrs.NoKey,
 		)
 		s.SetResourceInstanceCurrent(
 			addrs.Resource{
@@ -661,6 +671,7 @@ func TestStateMv_instanceToResource(t *testing.T) {
 				Provider: addrs.NewDefaultProvider("test"),
 				Module:   addrs.RootModule,
 			},
+			addrs.NoKey,
 		)
 	})
 	statePath := testStateFile(t, state)
@@ -691,12 +702,12 @@ func TestStateMv_instanceToResource(t *testing.T) {
 	testStateOutput(t, statePath, `
 test_instance.bar:
   ID = bar
-  provider = provider["registry.terraform.io/hashicorp/test"]
+  provider = provider["registry.opentofu.org/hashicorp/test"]
   bar = value
   foo = value
 test_instance.baz:
   ID = foo
-  provider = provider["registry.terraform.io/hashicorp/test"]
+  provider = provider["registry.opentofu.org/hashicorp/test"]
   bar = value
   foo = value
 `)
@@ -709,12 +720,12 @@ test_instance.baz:
 	testStateOutput(t, backups[0], `
 test_instance.baz:
   ID = foo
-  provider = provider["registry.terraform.io/hashicorp/test"]
+  provider = provider["registry.opentofu.org/hashicorp/test"]
   bar = value
   foo = value
 test_instance.foo.0:
   ID = bar
-  provider = provider["registry.terraform.io/hashicorp/test"]
+  provider = provider["registry.opentofu.org/hashicorp/test"]
   bar = value
   foo = value
 `)
@@ -736,6 +747,7 @@ func TestStateMv_instanceToNewResource(t *testing.T) {
 				Provider: addrs.NewDefaultProvider("test"),
 				Module:   addrs.RootModule,
 			},
+			addrs.NoKey,
 		)
 	})
 	statePath := testStateFile(t, state)
@@ -766,7 +778,7 @@ func TestStateMv_instanceToNewResource(t *testing.T) {
 	testStateOutput(t, statePath, `
 test_instance.bar["new"]:
   ID = bar
-  provider = provider["registry.terraform.io/hashicorp/test"]
+  provider = provider["registry.opentofu.org/hashicorp/test"]
   bar = value
   foo = value
 `)
@@ -787,7 +799,7 @@ test_instance.bar["new"]:
 module.test:
   test_instance.baz["new"]:
     ID = bar
-    provider = provider["registry.terraform.io/hashicorp/test"]
+    provider = provider["registry.opentofu.org/hashicorp/test"]
     bar = value
     foo = value
 `)
@@ -809,6 +821,7 @@ func TestStateMv_differentResourceTypes(t *testing.T) {
 				Provider: addrs.NewDefaultProvider("test"),
 				Module:   addrs.RootModule,
 			},
+			addrs.NoKey,
 		)
 	})
 	statePath := testStateFile(t, state)
@@ -871,6 +884,7 @@ func TestStateMv_explicitWithBackend(t *testing.T) {
 				Provider: addrs.NewDefaultProvider("test"),
 				Module:   addrs.RootModule,
 			},
+			addrs.NoKey,
 		)
 		s.SetResourceInstanceCurrent(
 			addrs.Resource{
@@ -886,6 +900,7 @@ func TestStateMv_explicitWithBackend(t *testing.T) {
 				Provider: addrs.NewDefaultProvider("test"),
 				Module:   addrs.RootModule,
 			},
+			addrs.NoKey,
 		)
 	})
 	statePath := testStateFile(t, state)
@@ -949,6 +964,7 @@ func TestStateMv_backupExplicit(t *testing.T) {
 				Provider: addrs.NewDefaultProvider("test"),
 				Module:   addrs.RootModule,
 			},
+			addrs.NoKey,
 		)
 		s.SetResourceInstanceCurrent(
 			addrs.Resource{
@@ -965,6 +981,7 @@ func TestStateMv_backupExplicit(t *testing.T) {
 				Provider: addrs.NewDefaultProvider("test"),
 				Module:   addrs.RootModule,
 			},
+			addrs.NoKey,
 		)
 	})
 	statePath := testStateFile(t, state)
@@ -1016,6 +1033,7 @@ func TestStateMv_stateOutNew(t *testing.T) {
 				Provider: addrs.NewDefaultProvider("test"),
 				Module:   addrs.RootModule,
 			},
+			addrs.NoKey,
 		)
 	})
 	statePath := testStateFile(t, state)
@@ -1072,6 +1090,7 @@ func TestStateMv_stateOutExisting(t *testing.T) {
 				Provider: addrs.NewDefaultProvider("test"),
 				Module:   addrs.RootModule,
 			},
+			addrs.NoKey,
 		)
 	})
 	statePath := testStateFile(t, stateSrc)
@@ -1091,6 +1110,7 @@ func TestStateMv_stateOutExisting(t *testing.T) {
 				Provider: addrs.NewDefaultProvider("test"),
 				Module:   addrs.RootModule,
 			},
+			addrs.NoKey,
 		)
 	})
 	stateOutPath := testStateFile(t, stateDst)
@@ -1174,6 +1194,7 @@ func TestStateMv_stateOutNew_count(t *testing.T) {
 				Provider: addrs.NewDefaultProvider("test"),
 				Module:   addrs.RootModule,
 			},
+			addrs.NoKey,
 		)
 		s.SetResourceInstanceCurrent(
 			addrs.Resource{
@@ -1189,6 +1210,7 @@ func TestStateMv_stateOutNew_count(t *testing.T) {
 				Provider: addrs.NewDefaultProvider("test"),
 				Module:   addrs.RootModule,
 			},
+			addrs.NoKey,
 		)
 		s.SetResourceInstanceCurrent(
 			addrs.Resource{
@@ -1204,6 +1226,7 @@ func TestStateMv_stateOutNew_count(t *testing.T) {
 				Provider: addrs.NewDefaultProvider("test"),
 				Module:   addrs.RootModule,
 			},
+			addrs.NoKey,
 		)
 	})
 	statePath := testStateFile(t, state)
@@ -1264,6 +1287,7 @@ func TestStateMv_stateOutNew_largeCount(t *testing.T) {
 					Provider: addrs.NewDefaultProvider("test"),
 					Module:   addrs.RootModule,
 				},
+				addrs.NoKey,
 			)
 		}
 		s.SetResourceInstanceCurrent(
@@ -1280,6 +1304,7 @@ func TestStateMv_stateOutNew_largeCount(t *testing.T) {
 				Provider: addrs.NewDefaultProvider("test"),
 				Module:   addrs.RootModule,
 			},
+			addrs.NoKey,
 		)
 	})
 	statePath := testStateFile(t, state)
@@ -1336,6 +1361,7 @@ func TestStateMv_stateOutNew_nestedModule(t *testing.T) {
 				Provider: addrs.NewDefaultProvider("test"),
 				Module:   addrs.RootModule,
 			},
+			addrs.NoKey,
 		)
 		s.SetResourceInstanceCurrent(
 			addrs.Resource{
@@ -1351,6 +1377,7 @@ func TestStateMv_stateOutNew_nestedModule(t *testing.T) {
 				Provider: addrs.NewDefaultProvider("test"),
 				Module:   addrs.RootModule,
 			},
+			addrs.NoKey,
 		)
 	})
 
@@ -1408,6 +1435,7 @@ func TestStateMv_toNewModule(t *testing.T) {
 				Provider: addrs.NewDefaultProvider("test"),
 				Module:   addrs.RootModule,
 			},
+			addrs.NoKey,
 		)
 	})
 
@@ -1482,6 +1510,7 @@ func TestStateMv_withinBackend(t *testing.T) {
 				Provider: addrs.NewDefaultProvider("test"),
 				Module:   addrs.RootModule,
 			},
+			addrs.NoKey,
 		)
 		s.SetResourceInstanceCurrent(
 			addrs.Resource{
@@ -1498,6 +1527,7 @@ func TestStateMv_withinBackend(t *testing.T) {
 				Provider: addrs.NewDefaultProvider("test"),
 				Module:   addrs.RootModule,
 			},
+			addrs.NoKey,
 		)
 	})
 
@@ -1557,6 +1587,7 @@ func TestStateMv_fromBackendToLocal(t *testing.T) {
 			Provider: addrs.NewDefaultProvider("test"),
 			Module:   addrs.RootModule,
 		},
+		addrs.NoKey,
 	)
 	state.Module(addrs.RootModuleInstance).SetResourceInstanceCurrent(
 		mustResourceAddr("test_instance.baz").Resource.Instance(addrs.NoKey),
@@ -1568,6 +1599,7 @@ func TestStateMv_fromBackendToLocal(t *testing.T) {
 			Provider: addrs.NewDefaultProvider("test"),
 			Module:   addrs.RootModule,
 		},
+		addrs.NoKey,
 	)
 
 	// the local backend state file is "foo"
@@ -1633,6 +1665,7 @@ func TestStateMv_onlyResourceInModule(t *testing.T) {
 				Provider: addrs.NewDefaultProvider("test"),
 				Module:   addrs.RootModule,
 			},
+			addrs.NoKey,
 		)
 	})
 
@@ -1728,6 +1761,7 @@ func TestStateMv_checkRequiredVersion(t *testing.T) {
 				Provider: addrs.NewDefaultProvider("test"),
 				Module:   addrs.RootModule,
 			},
+			addrs.NoKey,
 		)
 		s.SetResourceInstanceCurrent(
 			addrs.Resource{
@@ -1744,6 +1778,7 @@ func TestStateMv_checkRequiredVersion(t *testing.T) {
 				Provider: addrs.NewDefaultProvider("test"),
 				Module:   addrs.RootModule,
 			},
+			addrs.NoKey,
 		)
 	})
 	statePath := testStateFile(t, state)
@@ -1787,7 +1822,7 @@ func TestStateMv_checkRequiredVersion(t *testing.T) {
 const testStateMvOutputOriginal = `
 test_instance.baz:
   ID = foo
-  provider = provider["registry.terraform.io/hashicorp/test"]
+  provider = provider["registry.opentofu.org/hashicorp/test"]
   bar = value
   foo = value
 
@@ -1795,7 +1830,7 @@ test_instance.baz:
     test_instance.foo
 test_instance.foo:
   ID = bar
-  provider = provider["registry.terraform.io/hashicorp/test"]
+  provider = provider["registry.opentofu.org/hashicorp/test"]
   bar = value
   foo = value
 `
@@ -1803,12 +1838,12 @@ test_instance.foo:
 const testStateMvOutput = `
 test_instance.bar:
   ID = bar
-  provider = provider["registry.terraform.io/hashicorp/test"]
+  provider = provider["registry.opentofu.org/hashicorp/test"]
   bar = value
   foo = value
 test_instance.baz:
   ID = foo
-  provider = provider["registry.terraform.io/hashicorp/test"]
+  provider = provider["registry.opentofu.org/hashicorp/test"]
   bar = value
   foo = value
 `
@@ -1816,7 +1851,7 @@ test_instance.baz:
 const testStateMvBackupAndBackupOutOptionsWithNonLocalBackendOutput = `
 test_instance.bar:
   ID = bar
-  provider = provider["registry.terraform.io/hashicorp/test"]
+  provider = provider["registry.opentofu.org/hashicorp/test"]
   bar = value
   foo = value
 `
@@ -1824,12 +1859,12 @@ test_instance.bar:
 const testStateMvCount_stateOut = `
 test_instance.bar.0:
   ID = foo
-  provider = provider["registry.terraform.io/hashicorp/test"]
+  provider = provider["registry.opentofu.org/hashicorp/test"]
   bar = value
   foo = value
 test_instance.bar.1:
   ID = bar
-  provider = provider["registry.terraform.io/hashicorp/test"]
+  provider = provider["registry.opentofu.org/hashicorp/test"]
   bar = value
   foo = value
 `
@@ -1837,7 +1872,7 @@ test_instance.bar.1:
 const testStateMvCount_stateOutSrc = `
 test_instance.bar:
   ID = bar
-  provider = provider["registry.terraform.io/hashicorp/test"]
+  provider = provider["registry.opentofu.org/hashicorp/test"]
   bar = value
   foo = value
 `
@@ -1845,17 +1880,17 @@ test_instance.bar:
 const testStateMvCount_stateOutOriginal = `
 test_instance.bar:
   ID = bar
-  provider = provider["registry.terraform.io/hashicorp/test"]
+  provider = provider["registry.opentofu.org/hashicorp/test"]
   bar = value
   foo = value
 test_instance.foo.0:
   ID = foo
-  provider = provider["registry.terraform.io/hashicorp/test"]
+  provider = provider["registry.opentofu.org/hashicorp/test"]
   bar = value
   foo = value
 test_instance.foo.1:
   ID = bar
-  provider = provider["registry.terraform.io/hashicorp/test"]
+  provider = provider["registry.opentofu.org/hashicorp/test"]
   bar = value
   foo = value
 `
@@ -1863,57 +1898,57 @@ test_instance.foo.1:
 const testStateMvLargeCount_stateOut = `
 test_instance.bar.0:
   ID = foo0
-  provider = provider["registry.terraform.io/hashicorp/test"]
+  provider = provider["registry.opentofu.org/hashicorp/test"]
   bar = value
   foo = value
 test_instance.bar.1:
   ID = foo1
-  provider = provider["registry.terraform.io/hashicorp/test"]
+  provider = provider["registry.opentofu.org/hashicorp/test"]
   bar = value
   foo = value
 test_instance.bar.2:
   ID = foo2
-  provider = provider["registry.terraform.io/hashicorp/test"]
+  provider = provider["registry.opentofu.org/hashicorp/test"]
   bar = value
   foo = value
 test_instance.bar.3:
   ID = foo3
-  provider = provider["registry.terraform.io/hashicorp/test"]
+  provider = provider["registry.opentofu.org/hashicorp/test"]
   bar = value
   foo = value
 test_instance.bar.4:
   ID = foo4
-  provider = provider["registry.terraform.io/hashicorp/test"]
+  provider = provider["registry.opentofu.org/hashicorp/test"]
   bar = value
   foo = value
 test_instance.bar.5:
   ID = foo5
-  provider = provider["registry.terraform.io/hashicorp/test"]
+  provider = provider["registry.opentofu.org/hashicorp/test"]
   bar = value
   foo = value
 test_instance.bar.6:
   ID = foo6
-  provider = provider["registry.terraform.io/hashicorp/test"]
+  provider = provider["registry.opentofu.org/hashicorp/test"]
   bar = value
   foo = value
 test_instance.bar.7:
   ID = foo7
-  provider = provider["registry.terraform.io/hashicorp/test"]
+  provider = provider["registry.opentofu.org/hashicorp/test"]
   bar = value
   foo = value
 test_instance.bar.8:
   ID = foo8
-  provider = provider["registry.terraform.io/hashicorp/test"]
+  provider = provider["registry.opentofu.org/hashicorp/test"]
   bar = value
   foo = value
 test_instance.bar.9:
   ID = foo9
-  provider = provider["registry.terraform.io/hashicorp/test"]
+  provider = provider["registry.opentofu.org/hashicorp/test"]
   bar = value
   foo = value
 test_instance.bar.10:
   ID = foo10
-  provider = provider["registry.terraform.io/hashicorp/test"]
+  provider = provider["registry.opentofu.org/hashicorp/test"]
   bar = value
   foo = value
 `
@@ -1921,7 +1956,7 @@ test_instance.bar.10:
 const testStateMvLargeCount_stateOutSrc = `
 test_instance.bar:
   ID = bar
-  provider = provider["registry.terraform.io/hashicorp/test"]
+  provider = provider["registry.opentofu.org/hashicorp/test"]
   bar = value
   foo = value
 `
@@ -1929,62 +1964,62 @@ test_instance.bar:
 const testStateMvLargeCount_stateOutOriginal = `
 test_instance.bar:
   ID = bar
-  provider = provider["registry.terraform.io/hashicorp/test"]
+  provider = provider["registry.opentofu.org/hashicorp/test"]
   bar = value
   foo = value
 test_instance.foo.0:
   ID = foo0
-  provider = provider["registry.terraform.io/hashicorp/test"]
+  provider = provider["registry.opentofu.org/hashicorp/test"]
   bar = value
   foo = value
 test_instance.foo.1:
   ID = foo1
-  provider = provider["registry.terraform.io/hashicorp/test"]
+  provider = provider["registry.opentofu.org/hashicorp/test"]
   bar = value
   foo = value
 test_instance.foo.2:
   ID = foo2
-  provider = provider["registry.terraform.io/hashicorp/test"]
+  provider = provider["registry.opentofu.org/hashicorp/test"]
   bar = value
   foo = value
 test_instance.foo.3:
   ID = foo3
-  provider = provider["registry.terraform.io/hashicorp/test"]
+  provider = provider["registry.opentofu.org/hashicorp/test"]
   bar = value
   foo = value
 test_instance.foo.4:
   ID = foo4
-  provider = provider["registry.terraform.io/hashicorp/test"]
+  provider = provider["registry.opentofu.org/hashicorp/test"]
   bar = value
   foo = value
 test_instance.foo.5:
   ID = foo5
-  provider = provider["registry.terraform.io/hashicorp/test"]
+  provider = provider["registry.opentofu.org/hashicorp/test"]
   bar = value
   foo = value
 test_instance.foo.6:
   ID = foo6
-  provider = provider["registry.terraform.io/hashicorp/test"]
+  provider = provider["registry.opentofu.org/hashicorp/test"]
   bar = value
   foo = value
 test_instance.foo.7:
   ID = foo7
-  provider = provider["registry.terraform.io/hashicorp/test"]
+  provider = provider["registry.opentofu.org/hashicorp/test"]
   bar = value
   foo = value
 test_instance.foo.8:
   ID = foo8
-  provider = provider["registry.terraform.io/hashicorp/test"]
+  provider = provider["registry.opentofu.org/hashicorp/test"]
   bar = value
   foo = value
 test_instance.foo.9:
   ID = foo9
-  provider = provider["registry.terraform.io/hashicorp/test"]
+  provider = provider["registry.opentofu.org/hashicorp/test"]
   bar = value
   foo = value
 test_instance.foo.10:
   ID = foo10
-  provider = provider["registry.terraform.io/hashicorp/test"]
+  provider = provider["registry.opentofu.org/hashicorp/test"]
   bar = value
   foo = value
 `
@@ -1994,13 +2029,13 @@ const testStateMvNestedModule_stateOut = `
 module.bar.child1:
   test_instance.foo:
     ID = bar
-    provider = provider["registry.terraform.io/hashicorp/test"]
+    provider = provider["registry.opentofu.org/hashicorp/test"]
     bar = value
     foo = value
 module.bar.child2:
   test_instance.foo:
     ID = bar
-    provider = provider["registry.terraform.io/hashicorp/test"]
+    provider = provider["registry.opentofu.org/hashicorp/test"]
     bar = value
     foo = value
 `
@@ -2010,7 +2045,7 @@ const testStateMvNewModule_stateOut = `
 module.bar:
   test_instance.bar:
     ID = bar
-    provider = provider["registry.terraform.io/hashicorp/test"]
+    provider = provider["registry.opentofu.org/hashicorp/test"]
     bar = value
     foo = value
 `
@@ -2020,7 +2055,7 @@ const testStateMvModuleNewModule_stateOut = `
 module.foo:
   test_instance.bar:
     ID = bar
-    provider = provider["registry.terraform.io/hashicorp/test"]
+    provider = provider["registry.opentofu.org/hashicorp/test"]
     bar = value
     foo = value
 `
@@ -2028,7 +2063,7 @@ module.foo:
 const testStateMvNewModule_stateOutOriginal = `
 test_instance.bar:
   ID = bar
-  provider = provider["registry.terraform.io/hashicorp/test"]
+  provider = provider["registry.opentofu.org/hashicorp/test"]
   bar = value
   foo = value
 `
@@ -2042,13 +2077,13 @@ const testStateMvNestedModule_stateOutOriginal = `
 module.foo.child1:
   test_instance.foo:
     ID = bar
-    provider = provider["registry.terraform.io/hashicorp/test"]
+    provider = provider["registry.opentofu.org/hashicorp/test"]
     bar = value
     foo = value
 module.foo.child2:
   test_instance.foo:
     ID = bar
-    provider = provider["registry.terraform.io/hashicorp/test"]
+    provider = provider["registry.opentofu.org/hashicorp/test"]
     bar = value
     foo = value
 `
@@ -2056,7 +2091,7 @@ module.foo.child2:
 const testStateMvOutput_stateOut = `
 test_instance.bar:
   ID = bar
-  provider = provider["registry.terraform.io/hashicorp/test"]
+  provider = provider["registry.opentofu.org/hashicorp/test"]
   bar = value
   foo = value
 `
@@ -2068,7 +2103,7 @@ const testStateMvOutput_stateOutSrc = `
 const testStateMvOutput_stateOutOriginal = `
 test_instance.foo:
   ID = bar
-  provider = provider["registry.terraform.io/hashicorp/test"]
+  provider = provider["registry.opentofu.org/hashicorp/test"]
   bar = value
   foo = value
 `
@@ -2080,18 +2115,18 @@ const testStateMvExisting_stateSrc = `
 const testStateMvExisting_stateDst = `
 test_instance.bar:
   ID = bar
-  provider = provider["registry.terraform.io/hashicorp/test"]
+  provider = provider["registry.opentofu.org/hashicorp/test"]
   bar = value
   foo = value
 test_instance.qux:
   ID = bar
-  provider = provider["registry.terraform.io/hashicorp/test"]
+  provider = provider["registry.opentofu.org/hashicorp/test"]
 `
 
 const testStateMvExisting_stateSrcOriginal = `
 test_instance.foo:
   ID = bar
-  provider = provider["registry.terraform.io/hashicorp/test"]
+  provider = provider["registry.opentofu.org/hashicorp/test"]
   bar = value
   foo = value
 `
@@ -2099,13 +2134,13 @@ test_instance.foo:
 const testStateMvExisting_stateDstOriginal = `
 test_instance.qux:
   ID = bar
-  provider = provider["registry.terraform.io/hashicorp/test"]
+  provider = provider["registry.opentofu.org/hashicorp/test"]
 `
 
 const testStateMvOriginal_backend = `
 test_instance.baz:
   ID = foo
-  provider = provider["registry.terraform.io/hashicorp/test"]
+  provider = provider["registry.opentofu.org/hashicorp/test"]
   bar = value
   foo = value
 `
@@ -2115,7 +2150,7 @@ const testStateMvOnlyResourceInModule_original = `
 module.foo:
   test_instance.foo.0:
     ID = bar
-    provider = provider["registry.terraform.io/hashicorp/test"]
+    provider = provider["registry.opentofu.org/hashicorp/test"]
     bar = value
     foo = value
 `
@@ -2125,7 +2160,7 @@ const testStateMvOnlyResourceInModule_output = `
 module.foo:
   test_instance.bar.0:
     ID = bar
-    provider = provider["registry.terraform.io/hashicorp/test"]
+    provider = provider["registry.opentofu.org/hashicorp/test"]
     bar = value
     foo = value
 `

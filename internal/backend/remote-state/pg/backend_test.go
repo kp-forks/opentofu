@@ -1,4 +1,6 @@
-// Copyright (c) HashiCorp, Inc.
+// Copyright (c) The OpenTofu Authors
+// SPDX-License-Identifier: MPL-2.0
+// Copyright (c) 2023 HashiCorp, Inc.
 // SPDX-License-Identifier: MPL-2.0
 
 package pg
@@ -17,6 +19,7 @@ import (
 	"github.com/hashicorp/hcl/v2/hcldec"
 	"github.com/lib/pq"
 	"github.com/opentofu/opentofu/internal/backend"
+	"github.com/opentofu/opentofu/internal/encryption"
 	"github.com/opentofu/opentofu/internal/states/remote"
 	"github.com/opentofu/opentofu/internal/states/statemgr"
 	"github.com/opentofu/opentofu/internal/tfdiags"
@@ -26,22 +29,22 @@ import (
 //
 // A running Postgres server identified by env variable
 // DATABASE_URL is required for acceptance tests.
-func testACC(t *testing.T) string {
-	skip := os.Getenv("TF_ACC") == ""
+func testACC(t *testing.T) (connectionURI *url.URL) {
+	skip := os.Getenv("TF_ACC") == "" && os.Getenv("TF_PG_TEST") == ""
 	if skip {
-		t.Log("pg backend tests require setting TF_ACC")
+		t.Log("pg backend tests requires setting TF_ACC or TF_PG_TEST")
 		t.Skip()
 	}
 	databaseUrl, found := os.LookupEnv("DATABASE_URL")
 	if !found {
-		databaseUrl = "postgres://localhost/terraform_backend_pg_test?sslmode=disable"
-		os.Setenv("DATABASE_URL", databaseUrl)
+		t.Fatal("pg backend tests require setting DATABASE_URL")
 	}
+
 	u, err := url.Parse(databaseUrl)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return u.Path[1:]
+	return u
 }
 
 func TestBackend_impl(t *testing.T) {
@@ -49,8 +52,15 @@ func TestBackend_impl(t *testing.T) {
 }
 
 func TestBackendConfig(t *testing.T) {
-	databaseName := testACC(t)
-	connStr := getDatabaseUrl()
+	connectionURI := testACC(t)
+	connStr := os.Getenv("DATABASE_URL")
+
+	user := connectionURI.User.Username()
+	password, _ := connectionURI.User.Password()
+	databaseName := connectionURI.Path[1:]
+
+	connectionURIObfuscated := connectionURI
+	connectionURIObfuscated.User = nil
 
 	testCases := []struct {
 		Name                     string
@@ -71,6 +81,8 @@ func TestBackendConfig(t *testing.T) {
 			EnvVars: map[string]string{
 				"PGSSLMODE":  "disable",
 				"PGDATABASE": databaseName,
+				"PGUSER":     user,
+				"PGPASSWORD": password,
 			},
 			Config: map[string]interface{}{
 				"schema_name": fmt.Sprintf("terraform_%s", t.Name()),
@@ -92,10 +104,10 @@ func TestBackendConfig(t *testing.T) {
 				"PGPASSWORD": "badpassword",
 			},
 			Config: map[string]interface{}{
-				"conn_str":    connStr,
+				"conn_str":    connectionURIObfuscated.String(),
 				"schema_name": fmt.Sprintf("terraform_%s", t.Name()),
 			},
-			ExpectConnectionError: `role "baduser" does not exist`,
+			ExpectConnectionError: `authentication failed for user "baduser"`,
 		},
 		{
 			Name: "host-in-env-vars",
@@ -117,6 +129,7 @@ func TestBackendConfig(t *testing.T) {
 				"PGDATABASE":              databaseName,
 			},
 			Config: map[string]interface{}{
+				"conn_str":    connStr,
 				"schema_name": fmt.Sprintf("terraform_%s", t.Name()),
 			},
 		},
@@ -147,10 +160,10 @@ func TestBackendConfig(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer dbCleaner.Query(fmt.Sprintf("DROP SCHEMA IF EXISTS %s CASCADE", schemaName))
+			defer dropSchemaByQuotedName(t, dbCleaner, schemaName)
 
 			var diags tfdiags.Diagnostics
-			b := New().(*Backend)
+			b := New(encryption.StateEncryptionDisabled()).(*Backend)
 			schema := b.ConfigSchema()
 			spec := schema.DecoderSpec()
 			obj, decDiags := hcldec.Decode(config, spec, nil)
@@ -311,9 +324,9 @@ func TestBackendConfigSkipOptions(t *testing.T) {
 			if tc.Setup != nil {
 				tc.Setup(t, db, schemaName)
 			}
-			defer db.Query(fmt.Sprintf("DROP SCHEMA IF EXISTS %s CASCADE", schemaName))
+			defer dropSchemaByQuotedName(t, db, schemaName)
 
-			b := backend.TestBackendConfig(t, New(), config).(*Backend)
+			b := backend.TestBackendConfig(t, New(encryption.StateEncryptionDisabled()), config).(*Backend)
 
 			if b == nil {
 				t.Fatal("Backend could not be configured")
@@ -380,13 +393,13 @@ func TestBackendStates(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer dbCleaner.Query(fmt.Sprintf("DROP SCHEMA IF EXISTS %s CASCADE", pq.QuoteIdentifier(schemaName)))
+			defer dropSchema(t, dbCleaner, schemaName)
 
 			config := backend.TestWrapConfig(map[string]interface{}{
 				"conn_str":    connStr,
 				"schema_name": schemaName,
 			})
-			b := backend.TestBackendConfig(t, New(), config).(*Backend)
+			b := backend.TestBackendConfig(t, New(encryption.StateEncryptionDisabled()), config).(*Backend)
 
 			if b == nil {
 				t.Fatal("Backend could not be configured")
@@ -405,19 +418,19 @@ func TestBackendStateLocks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer dbCleaner.Query(fmt.Sprintf("DROP SCHEMA IF EXISTS %s CASCADE", schemaName))
+	defer dropSchema(t, dbCleaner, schemaName)
 
 	config := backend.TestWrapConfig(map[string]interface{}{
 		"conn_str":    connStr,
 		"schema_name": schemaName,
 	})
-	b := backend.TestBackendConfig(t, New(), config).(*Backend)
+	b := backend.TestBackendConfig(t, New(encryption.StateEncryptionDisabled()), config).(*Backend)
 
 	if b == nil {
 		t.Fatal("Backend could not be configured")
 	}
 
-	bb := backend.TestBackendConfig(t, New(), config).(*Backend)
+	bb := backend.TestBackendConfig(t, New(encryption.StateEncryptionDisabled()), config).(*Backend)
 
 	if bb == nil {
 		t.Fatal("Backend could not be configured")
@@ -435,12 +448,11 @@ func TestBackendConcurrentLock(t *testing.T) {
 	}
 
 	getStateMgr := func(schemaName string) (statemgr.Full, *statemgr.LockInfo) {
-		defer dbCleaner.Query(fmt.Sprintf("DROP SCHEMA IF EXISTS %s CASCADE", schemaName))
 		config := backend.TestWrapConfig(map[string]interface{}{
 			"conn_str":    connStr,
 			"schema_name": schemaName,
 		})
-		b := backend.TestBackendConfig(t, New(), config).(*Backend)
+		b := backend.TestBackendConfig(t, New(encryption.StateEncryptionDisabled()), config).(*Backend)
 
 		if b == nil {
 			t.Fatal("Backend could not be configured")
@@ -457,8 +469,12 @@ func TestBackendConcurrentLock(t *testing.T) {
 		return stateMgr, info
 	}
 
-	s1, i1 := getStateMgr(fmt.Sprintf("terraform_%s_1", t.Name()))
-	s2, i2 := getStateMgr(fmt.Sprintf("terraform_%s_2", t.Name()))
+	firstSchema, secondSchema := fmt.Sprintf("terraform_%s_1", t.Name()), fmt.Sprintf("terraform_%s_2", t.Name())
+	defer dropSchema(t, dbCleaner, firstSchema)
+	defer dropSchema(t, dbCleaner, secondSchema)
+
+	s1, i1 := getStateMgr(firstSchema)
+	s2, i2 := getStateMgr(secondSchema)
 
 	// First we need to create the workspace as the lock for creating them is
 	// global
@@ -510,4 +526,19 @@ func TestBackendConcurrentLock(t *testing.T) {
 
 func getDatabaseUrl() string {
 	return os.Getenv("DATABASE_URL")
+}
+
+func dropSchema(t *testing.T, db *sql.DB, schemaName string) {
+	dropSchemaByQuotedName(t, db, pq.QuoteIdentifier(schemaName))
+}
+
+func dropSchemaByQuotedName(t *testing.T, db *sql.DB, quotedSchemaName string) {
+	rows, err := db.Query(fmt.Sprintf("DROP SCHEMA IF EXISTS %s CASCADE", quotedSchemaName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	if err = rows.Err(); err != nil {
+		t.Fatal(err)
+	}
 }

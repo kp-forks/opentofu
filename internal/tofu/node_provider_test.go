@@ -1,4 +1,6 @@
-// Copyright (c) HashiCorp, Inc.
+// Copyright (c) The OpenTofu Authors
+// SPDX-License-Identifier: MPL-2.0
+// Copyright (c) 2023 HashiCorp, Inc.
 // SPDX-License-Identifier: MPL-2.0
 
 package tofu
@@ -104,7 +106,7 @@ func TestNodeApplyableProviderExecute_unknownImport(t *testing.T) {
 		t.Fatal("expected error, got success")
 	}
 
-	detail := `Invalid provider configuration: The configuration for provider["registry.terraform.io/hashicorp/foo"] depends on values that cannot be determined until apply.`
+	detail := `Invalid provider configuration: The configuration for provider["registry.opentofu.org/hashicorp/foo"] depends on values that cannot be determined until apply.`
 	if got, want := diags.Err().Error(), detail; got != want {
 		t.Errorf("wrong diagnostic detail\n got: %q\nwant: %q", got, want)
 	}
@@ -280,12 +282,12 @@ func TestNodeApplyableProvider_Validate(t *testing.T) {
 
 		node := NodeApplyableProvider{
 			NodeAbstractProvider: &NodeAbstractProvider{
-				Addr:   mustProviderConfig(`provider["registry.terraform.io/hashicorp/aws"]`),
+				Addr:   mustProviderConfig(`provider["registry.opentofu.org/hashicorp/aws"]`),
 				Config: config,
 			},
 		}
 
-		diags := node.ValidateProvider(ctx, provider)
+		diags := node.ValidateProvider(ctx, addrs.NoKey, provider)
 		if diags.HasErrors() {
 			t.Errorf("unexpected error with valid config: %s", diags.Err())
 		}
@@ -301,12 +303,12 @@ func TestNodeApplyableProvider_Validate(t *testing.T) {
 
 		node := NodeApplyableProvider{
 			NodeAbstractProvider: &NodeAbstractProvider{
-				Addr:   mustProviderConfig(`provider["registry.terraform.io/hashicorp/aws"]`),
+				Addr:   mustProviderConfig(`provider["registry.opentofu.org/hashicorp/aws"]`),
 				Config: config,
 			},
 		}
 
-		diags := node.ValidateProvider(ctx, provider)
+		diags := node.ValidateProvider(ctx, addrs.NoKey, provider)
 		if !diags.HasErrors() {
 			t.Error("missing expected error with invalid config")
 		}
@@ -315,11 +317,11 @@ func TestNodeApplyableProvider_Validate(t *testing.T) {
 	t.Run("empty config", func(t *testing.T) {
 		node := NodeApplyableProvider{
 			NodeAbstractProvider: &NodeAbstractProvider{
-				Addr: mustProviderConfig(`provider["registry.terraform.io/hashicorp/aws"]`),
+				Addr: mustProviderConfig(`provider["registry.opentofu.org/hashicorp/aws"]`),
 			},
 		}
 
-		diags := node.ValidateProvider(ctx, provider)
+		diags := node.ValidateProvider(ctx, addrs.NoKey, provider)
 		if diags.HasErrors() {
 			t.Errorf("unexpected error with empty config: %s", diags.Err())
 		}
@@ -362,12 +364,12 @@ func TestNodeApplyableProvider_ConfigProvider(t *testing.T) {
 
 		node := NodeApplyableProvider{
 			NodeAbstractProvider: &NodeAbstractProvider{
-				Addr:   mustProviderConfig(`provider["registry.terraform.io/hashicorp/aws"]`),
+				Addr:   mustProviderConfig(`provider["registry.opentofu.org/hashicorp/aws"]`),
 				Config: config,
 			},
 		}
 
-		diags := node.ConfigureProvider(ctx, provider, false)
+		diags := node.ConfigureProvider(ctx, addrs.NoKey, provider, false)
 		if diags.HasErrors() {
 			t.Errorf("unexpected error with valid config: %s", diags.Err())
 		}
@@ -376,11 +378,11 @@ func TestNodeApplyableProvider_ConfigProvider(t *testing.T) {
 	t.Run("missing required config (no config at all)", func(t *testing.T) {
 		node := NodeApplyableProvider{
 			NodeAbstractProvider: &NodeAbstractProvider{
-				Addr: mustProviderConfig(`provider["registry.terraform.io/hashicorp/aws"]`),
+				Addr: mustProviderConfig(`provider["registry.opentofu.org/hashicorp/aws"]`),
 			},
 		}
 
-		diags := node.ConfigureProvider(ctx, provider, false)
+		diags := node.ConfigureProvider(ctx, addrs.NoKey, provider, false)
 		if !diags.HasErrors() {
 			t.Fatal("missing expected error with nil config")
 		}
@@ -396,12 +398,12 @@ func TestNodeApplyableProvider_ConfigProvider(t *testing.T) {
 		}
 		node := NodeApplyableProvider{
 			NodeAbstractProvider: &NodeAbstractProvider{
-				Addr:   mustProviderConfig(`provider["registry.terraform.io/hashicorp/aws"]`),
+				Addr:   mustProviderConfig(`provider["registry.opentofu.org/hashicorp/aws"]`),
 				Config: config,
 			},
 		}
 
-		diags := node.ConfigureProvider(ctx, provider, false)
+		diags := node.ConfigureProvider(ctx, addrs.NoKey, provider, false)
 		if !diags.HasErrors() {
 			t.Fatal("missing expected error with invalid config")
 		}
@@ -451,12 +453,12 @@ func TestNodeApplyableProvider_ConfigProvider_config_fn_err(t *testing.T) {
 
 		node := NodeApplyableProvider{
 			NodeAbstractProvider: &NodeAbstractProvider{
-				Addr:   mustProviderConfig(`provider["registry.terraform.io/hashicorp/aws"]`),
+				Addr:   mustProviderConfig(`provider["registry.opentofu.org/hashicorp/aws"]`),
 				Config: config,
 			},
 		}
 
-		diags := node.ConfigureProvider(ctx, provider, false)
+		diags := node.ConfigureProvider(ctx, addrs.NoKey, provider, false)
 		if diags.HasErrors() {
 			t.Errorf("unexpected error with valid config: %s", diags.Err())
 		}
@@ -465,11 +467,11 @@ func TestNodeApplyableProvider_ConfigProvider_config_fn_err(t *testing.T) {
 	t.Run("missing required config (no config at all)", func(t *testing.T) {
 		node := NodeApplyableProvider{
 			NodeAbstractProvider: &NodeAbstractProvider{
-				Addr: mustProviderConfig(`provider["registry.terraform.io/hashicorp/aws"]`),
+				Addr: mustProviderConfig(`provider["registry.opentofu.org/hashicorp/aws"]`),
 			},
 		}
 
-		diags := node.ConfigureProvider(ctx, provider, false)
+		diags := node.ConfigureProvider(ctx, addrs.NoKey, provider, false)
 		if !diags.HasErrors() {
 			t.Fatal("missing expected error with nil config")
 		}
@@ -485,12 +487,12 @@ func TestNodeApplyableProvider_ConfigProvider_config_fn_err(t *testing.T) {
 		}
 		node := NodeApplyableProvider{
 			NodeAbstractProvider: &NodeAbstractProvider{
-				Addr:   mustProviderConfig(`provider["registry.terraform.io/hashicorp/aws"]`),
+				Addr:   mustProviderConfig(`provider["registry.opentofu.org/hashicorp/aws"]`),
 				Config: config,
 			},
 		}
 
-		diags := node.ConfigureProvider(ctx, provider, false)
+		diags := node.ConfigureProvider(ctx, addrs.NoKey, provider, false)
 		if !diags.HasErrors() {
 			t.Fatal("missing expected error with invalid config")
 		}
@@ -516,7 +518,7 @@ func TestGetSchemaError(t *testing.T) {
 		},
 	}
 
-	diags := node.ConfigureProvider(ctx, provider, false)
+	diags := node.ConfigureProvider(ctx, addrs.NoKey, provider, false)
 	for _, d := range diags {
 		desc := d.Description()
 		if desc.Address != providerAddr.String() {
