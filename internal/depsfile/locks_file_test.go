@@ -1,4 +1,6 @@
-// Copyright (c) HashiCorp, Inc.
+// Copyright (c) The OpenTofu Authors
+// SPDX-License-Identifier: MPL-2.0
+// Copyright (c) 2023 HashiCorp, Inc.
 // SPDX-License-Identifier: MPL-2.0
 
 package depsfile
@@ -246,21 +248,21 @@ func TestSaveLocksToFile(t *testing.T) {
 	wantContent := `# This file is maintained automatically by "tofu init".
 # Manual edits may be lost in future updates.
 
-provider "registry.terraform.io/test/bar" {
+provider "registry.opentofu.org/test/bar" {
   version     = "1.2.0"
   constraints = "~> 1.0"
 }
 
-provider "registry.terraform.io/test/baz" {
+provider "registry.opentofu.org/test/baz" {
   version = "1.2.0"
 }
 
-provider "registry.terraform.io/test/boo" {
+provider "registry.opentofu.org/test/boo" {
   version     = "1.2.0"
   constraints = "1.2.0"
 }
 
-provider "registry.terraform.io/test/foo" {
+provider "registry.opentofu.org/test/foo" {
   version     = "1.0.0"
   constraints = ">= 1.0.0"
   hashes = [

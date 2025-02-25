@@ -1,11 +1,15 @@
-// Copyright (c) HashiCorp, Inc.
+// Copyright (c) The OpenTofu Authors
+// SPDX-License-Identifier: MPL-2.0
+// Copyright (c) 2023 HashiCorp, Inc.
 // SPDX-License-Identifier: MPL-2.0
 
 package s3
 
 import (
+	"context"
 	"encoding/base64"
 	"fmt"
+	"net/http"
 	"net/url"
 	"os"
 	"reflect"
@@ -13,19 +17,27 @@ import (
 	"testing"
 	"time"
 
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/service/dynamodb"
-	"github.com/aws/aws-sdk-go/service/s3"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	awshttp "github.com/aws/aws-sdk-go-v2/aws/transport/http"
+	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
+	dtypes "github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
+	types "github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/google/go-cmp/cmp"
-	awsbase "github.com/hashicorp/aws-sdk-go-base"
+	"github.com/hashicorp/aws-sdk-go-base/v2/mockdata"
+	"github.com/hashicorp/aws-sdk-go-base/v2/servicemocks"
+	"github.com/zclconf/go-cty/cty"
+
 	"github.com/opentofu/opentofu/internal/backend"
 	"github.com/opentofu/opentofu/internal/configs/configschema"
 	"github.com/opentofu/opentofu/internal/configs/hcl2shim"
+	"github.com/opentofu/opentofu/internal/encryption"
 	"github.com/opentofu/opentofu/internal/states"
 	"github.com/opentofu/opentofu/internal/states/remote"
 	"github.com/opentofu/opentofu/internal/tfdiags"
-	"github.com/zclconf/go-cty/cty"
 )
+
+const testBucketPrefix = "tofu-test"
 
 var (
 	mockStsGetCallerIdentityRequestBody = url.Values{
@@ -36,14 +48,13 @@ var (
 
 // verify that we are doing ACC tests or the S3 tests specifically
 func testACC(t *testing.T) {
+	t.Helper()
 	skip := os.Getenv("TF_ACC") == "" && os.Getenv("TF_S3_TEST") == ""
 	if skip {
 		t.Log("s3 backend tests require setting TF_ACC or TF_S3_TEST")
 		t.Skip()
 	}
-	if os.Getenv("AWS_DEFAULT_REGION") == "" {
-		os.Setenv("AWS_DEFAULT_REGION", "us-west-2")
-	}
+	t.Setenv("AWS_DEFAULT_REGION", "us-west-2")
 }
 
 func TestBackend_impl(t *testing.T) {
@@ -54,32 +65,28 @@ func TestBackendConfig_original(t *testing.T) {
 	testACC(t)
 	config := map[string]interface{}{
 		"region":         "us-west-1",
-		"bucket":         "tf-test",
+		"bucket":         testBucketPrefix,
 		"key":            "state",
 		"encrypt":        true,
 		"dynamodb_table": "dynamoTable",
 	}
 
-	b := backend.TestBackendConfig(t, New(), backend.TestWrapConfig(config)).(*Backend)
+	b := backend.TestBackendConfig(t, New(encryption.StateEncryptionDisabled()), backend.TestWrapConfig(config)).(*Backend)
 
-	if aws.StringValue(b.s3Client.Config.Region) != "us-west-1" {
+	if b.awsConfig.Region != "us-west-1" {
 		t.Fatalf("Incorrect region was populated")
 	}
-	if aws.IntValue(b.s3Client.Config.MaxRetries) != 5 {
+	if b.awsConfig.RetryMaxAttempts != 5 {
 		t.Fatalf("Default max_retries was not set")
 	}
-	if b.bucketName != "tf-test" {
+	if b.bucketName != testBucketPrefix {
 		t.Fatalf("Incorrect bucketName was populated")
 	}
 	if b.keyName != "state" {
 		t.Fatalf("Incorrect keyName was populated")
 	}
 
-	checkClientEndpoint(t, b.s3Client.Config, "")
-
-	checkClientEndpoint(t, b.dynClient.Config, "")
-
-	credentials, err := b.s3Client.Config.Credentials.Get()
+	credentials, err := b.awsConfig.Credentials.Retrieve(context.TODO())
 	if err != nil {
 		t.Fatalf("Error when requesting credentials")
 	}
@@ -88,12 +95,6 @@ func TestBackendConfig_original(t *testing.T) {
 	}
 	if credentials.SecretAccessKey == "" {
 		t.Fatalf("No Secret Access Key was populated")
-	}
-}
-
-func checkClientEndpoint(t *testing.T, config aws.Config, expected string) {
-	if a := aws.StringValue(config.Endpoint); a != expected {
-		t.Errorf("expected endpoint %q, got %q", expected, a)
 	}
 }
 
@@ -107,7 +108,7 @@ func TestBackendConfig_InvalidRegion(t *testing.T) {
 		"with region validation": {
 			config: map[string]interface{}{
 				"region":                      "nonesuch",
-				"bucket":                      "tf-test",
+				"bucket":                      testBucketPrefix,
 				"key":                         "state",
 				"skip_credentials_validation": true,
 			},
@@ -115,7 +116,7 @@ func TestBackendConfig_InvalidRegion(t *testing.T) {
 				tfdiags.AttributeValue(
 					tfdiags.Error,
 					"Invalid region value",
-					`Invalid AWS Region: nonesuch`,
+					`invalid AWS Region: nonesuch`,
 					cty.Path{cty.GetAttrStep{Name: "region"}},
 				),
 			},
@@ -123,7 +124,7 @@ func TestBackendConfig_InvalidRegion(t *testing.T) {
 		"skip region validation": {
 			config: map[string]interface{}{
 				"region":                      "nonesuch",
-				"bucket":                      "tf-test",
+				"bucket":                      testBucketPrefix,
 				"key":                         "state",
 				"skip_region_validation":      true,
 				"skip_credentials_validation": true,
@@ -134,7 +135,7 @@ func TestBackendConfig_InvalidRegion(t *testing.T) {
 
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			b := New()
+			b := New(encryption.StateEncryptionDisabled())
 			configSchema := populateSchema(t, b.ConfigSchema(), hcl2shim.HCL2ValueFromConfigValue(tc.config))
 
 			configSchema, diags := b.PrepareConfig(configSchema)
@@ -155,7 +156,7 @@ func TestBackendConfig_InvalidRegion(t *testing.T) {
 func TestBackendConfig_RegionEnvVar(t *testing.T) {
 	testACC(t)
 	config := map[string]interface{}{
-		"bucket": "tf-test",
+		"bucket": testBucketPrefix,
 		"key":    "state",
 	}
 
@@ -178,17 +179,12 @@ func TestBackendConfig_RegionEnvVar(t *testing.T) {
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			for k, v := range tc.vars {
-				os.Setenv(k, v)
+				t.Setenv(k, v)
 			}
-			t.Cleanup(func() {
-				for k := range tc.vars {
-					os.Unsetenv(k)
-				}
-			})
 
-			b := backend.TestBackendConfig(t, New(), backend.TestWrapConfig(config)).(*Backend)
+			b := backend.TestBackendConfig(t, New(encryption.StateEncryptionDisabled()), backend.TestWrapConfig(config)).(*Backend)
 
-			if aws.StringValue(b.s3Client.Config.Region) != "us-west-1" {
+			if b.awsConfig.Region != "us-west-1" {
 				t.Fatalf("Incorrect region was populated")
 			}
 		})
@@ -224,19 +220,14 @@ func TestBackendConfig_DynamoDBEndpoint(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			config := map[string]interface{}{
 				"region": "us-west-1",
-				"bucket": "tf-test",
+				"bucket": testBucketPrefix,
 				"key":    "state",
 			}
 
 			if tc.vars != nil {
 				for k, v := range tc.vars {
-					os.Setenv(k, v)
+					t.Setenv(k, v)
 				}
-				t.Cleanup(func() {
-					for k := range tc.vars {
-						os.Unsetenv(k)
-					}
-				})
 			}
 
 			if tc.config != nil {
@@ -245,9 +236,7 @@ func TestBackendConfig_DynamoDBEndpoint(t *testing.T) {
 				}
 			}
 
-			b := backend.TestBackendConfig(t, New(), backend.TestWrapConfig(config)).(*Backend)
-
-			checkClientEndpoint(t, b.dynClient.Config, tc.expected)
+			backend.TestBackendConfig(t, New(encryption.StateEncryptionDisabled()), backend.TestWrapConfig(config))
 		})
 	}
 }
@@ -281,19 +270,14 @@ func TestBackendConfig_S3Endpoint(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			config := map[string]interface{}{
 				"region": "us-west-1",
-				"bucket": "tf-test",
+				"bucket": testBucketPrefix,
 				"key":    "state",
 			}
 
 			if tc.vars != nil {
 				for k, v := range tc.vars {
-					os.Setenv(k, v)
+					t.Setenv(k, v)
 				}
-				t.Cleanup(func() {
-					for k := range tc.vars {
-						os.Unsetenv(k)
-					}
-				})
 			}
 
 			if tc.config != nil {
@@ -302,9 +286,7 @@ func TestBackendConfig_S3Endpoint(t *testing.T) {
 				}
 			}
 
-			b := backend.TestBackendConfig(t, New(), backend.TestWrapConfig(config)).(*Backend)
-
-			checkClientEndpoint(t, b.s3Client.Config, tc.expected)
+			backend.TestBackendConfig(t, New(encryption.StateEncryptionDisabled()), backend.TestWrapConfig(config))
 		})
 	}
 }
@@ -312,20 +294,20 @@ func TestBackendConfig_S3Endpoint(t *testing.T) {
 func TestBackendConfig_STSEndpoint(t *testing.T) {
 	testACC(t)
 
-	stsMocks := []*awsbase.MockEndpoint{
+	stsMocks := []*servicemocks.MockEndpoint{
 		{
-			Request: &awsbase.MockRequest{Method: "POST", Uri: "/", Body: url.Values{
+			Request: &servicemocks.MockRequest{Method: "POST", Uri: "/", Body: url.Values{
 				"Action":          []string{"AssumeRole"},
 				"DurationSeconds": []string{"900"},
-				"RoleArn":         []string{awsbase.MockStsAssumeRoleArn},
-				"RoleSessionName": []string{awsbase.MockStsAssumeRoleSessionName},
+				"RoleArn":         []string{servicemocks.MockStsAssumeRoleArn},
+				"RoleSessionName": []string{servicemocks.MockStsAssumeRoleSessionName},
 				"Version":         []string{"2011-06-15"},
 			}.Encode()},
-			Response: &awsbase.MockResponse{StatusCode: 200, Body: awsbase.MockStsAssumeRoleValidResponseBody, ContentType: "text/xml"},
+			Response: &servicemocks.MockResponse{StatusCode: 200, Body: servicemocks.MockStsAssumeRoleValidResponseBody, ContentType: "text/xml"},
 		},
 		{
-			Request:  &awsbase.MockRequest{Method: "POST", Uri: "/", Body: mockStsGetCallerIdentityRequestBody},
-			Response: &awsbase.MockResponse{StatusCode: 200, Body: awsbase.MockStsGetCallerIdentityValidResponseBody, ContentType: "text/xml"},
+			Request:  &servicemocks.MockRequest{Method: "POST", Uri: "/", Body: mockStsGetCallerIdentityRequestBody},
+			Response: &servicemocks.MockResponse{StatusCode: 200, Body: servicemocks.MockStsGetCallerIdentityValidResponseBody, ContentType: "text/xml"},
 		},
 	}
 
@@ -338,7 +320,7 @@ func TestBackendConfig_STSEndpoint(t *testing.T) {
 			expectedDiags: tfdiags.Diagnostics{
 				tfdiags.Sourceless(
 					tfdiags.Error,
-					"Failed to configure AWS client",
+					"Cannot assume IAM Role",
 					``,
 				),
 			},
@@ -354,31 +336,27 @@ func TestBackendConfig_STSEndpoint(t *testing.T) {
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			config := map[string]interface{}{
-				"region":       "us-west-1",
-				"bucket":       "tf-test",
-				"key":          "state",
-				"role_arn":     awsbase.MockStsAssumeRoleArn,
-				"session_name": awsbase.MockStsAssumeRoleSessionName,
+				"region": "us-west-1",
+				"bucket": testBucketPrefix,
+				"key":    "state",
+				"assume_role": map[string]interface{}{
+					"role_arn":     servicemocks.MockStsAssumeRoleArn,
+					"session_name": servicemocks.MockStsAssumeRoleSessionName,
+				},
 			}
 
-			closeSts, mockStsSession, err := awsbase.GetMockedAwsApiSession("STS", stsMocks)
-			if err != nil {
-				t.Fatalf("unexpected error creating mock STS server: %s", err)
-			}
+			closeSts, _, endpoint := mockdata.GetMockedAwsApiSession("STS", stsMocks)
 			defer closeSts()
 
 			if tc.setEnvVars {
-				os.Setenv("AWS_STS_ENDPOINT", aws.StringValue(mockStsSession.Config.Endpoint))
-				t.Cleanup(func() {
-					os.Unsetenv("AWS_STS_ENDPOINT")
-				})
+				t.Setenv("AWS_STS_ENDPOINT", endpoint)
 			}
 
 			if tc.setConfig {
-				config["sts_endpoint"] = aws.StringValue(mockStsSession.Config.Endpoint)
+				config["sts_endpoint"] = endpoint
 			}
 
-			b := New()
+			b := New(encryption.StateEncryptionDisabled())
 			configSchema := populateSchema(t, b.ConfigSchema(), hcl2shim.HCL2ValueFromConfigValue(config))
 
 			configSchema, diags := b.PrepareConfig(configSchema)
@@ -402,206 +380,206 @@ func TestBackendConfig_AssumeRole(t *testing.T) {
 	testCases := []struct {
 		Config           map[string]interface{}
 		Description      string
-		MockStsEndpoints []*awsbase.MockEndpoint
+		MockStsEndpoints []*servicemocks.MockEndpoint
 	}{
 		{
 			Config: map[string]interface{}{
-				"bucket":       "tf-test",
+				"bucket":       testBucketPrefix,
 				"key":          "state",
 				"region":       "us-west-1",
-				"role_arn":     awsbase.MockStsAssumeRoleArn,
-				"session_name": awsbase.MockStsAssumeRoleSessionName,
+				"role_arn":     servicemocks.MockStsAssumeRoleArn,
+				"session_name": servicemocks.MockStsAssumeRoleSessionName,
 			},
 			Description: "role_arn",
-			MockStsEndpoints: []*awsbase.MockEndpoint{
+			MockStsEndpoints: []*servicemocks.MockEndpoint{
 				{
-					Request: &awsbase.MockRequest{Method: "POST", Uri: "/", Body: url.Values{
+					Request: &servicemocks.MockRequest{Method: "POST", Uri: "/", Body: url.Values{
 						"Action":          []string{"AssumeRole"},
 						"DurationSeconds": []string{"900"},
-						"RoleArn":         []string{awsbase.MockStsAssumeRoleArn},
-						"RoleSessionName": []string{awsbase.MockStsAssumeRoleSessionName},
+						"RoleArn":         []string{servicemocks.MockStsAssumeRoleArn},
+						"RoleSessionName": []string{servicemocks.MockStsAssumeRoleSessionName},
 						"Version":         []string{"2011-06-15"},
 					}.Encode()},
-					Response: &awsbase.MockResponse{StatusCode: 200, Body: awsbase.MockStsAssumeRoleValidResponseBody, ContentType: "text/xml"},
+					Response: &servicemocks.MockResponse{StatusCode: 200, Body: servicemocks.MockStsAssumeRoleValidResponseBody, ContentType: "text/xml"},
 				},
 				{
-					Request:  &awsbase.MockRequest{Method: "POST", Uri: "/", Body: mockStsGetCallerIdentityRequestBody},
-					Response: &awsbase.MockResponse{StatusCode: 200, Body: awsbase.MockStsGetCallerIdentityValidResponseBody, ContentType: "text/xml"},
+					Request:  &servicemocks.MockRequest{Method: "POST", Uri: "/", Body: mockStsGetCallerIdentityRequestBody},
+					Response: &servicemocks.MockResponse{StatusCode: 200, Body: servicemocks.MockStsGetCallerIdentityValidResponseBody, ContentType: "text/xml"},
 				},
 			},
 		},
 		{
 			Config: map[string]interface{}{
 				"assume_role_duration_seconds": 3600,
-				"bucket":                       "tf-test",
+				"bucket":                       testBucketPrefix,
 				"key":                          "state",
 				"region":                       "us-west-1",
-				"role_arn":                     awsbase.MockStsAssumeRoleArn,
-				"session_name":                 awsbase.MockStsAssumeRoleSessionName,
+				"role_arn":                     servicemocks.MockStsAssumeRoleArn,
+				"session_name":                 servicemocks.MockStsAssumeRoleSessionName,
 			},
 			Description: "assume_role_duration_seconds",
-			MockStsEndpoints: []*awsbase.MockEndpoint{
+			MockStsEndpoints: []*servicemocks.MockEndpoint{
 				{
-					Request: &awsbase.MockRequest{Method: "POST", Uri: "/", Body: url.Values{
+					Request: &servicemocks.MockRequest{Method: "POST", Uri: "/", Body: url.Values{
 						"Action":          []string{"AssumeRole"},
 						"DurationSeconds": []string{"3600"},
-						"RoleArn":         []string{awsbase.MockStsAssumeRoleArn},
-						"RoleSessionName": []string{awsbase.MockStsAssumeRoleSessionName},
+						"RoleArn":         []string{servicemocks.MockStsAssumeRoleArn},
+						"RoleSessionName": []string{servicemocks.MockStsAssumeRoleSessionName},
 						"Version":         []string{"2011-06-15"},
 					}.Encode()},
-					Response: &awsbase.MockResponse{StatusCode: 200, Body: awsbase.MockStsAssumeRoleValidResponseBody, ContentType: "text/xml"},
+					Response: &servicemocks.MockResponse{StatusCode: 200, Body: servicemocks.MockStsAssumeRoleValidResponseBody, ContentType: "text/xml"},
 				},
 				{
-					Request:  &awsbase.MockRequest{Method: "POST", Uri: "/", Body: mockStsGetCallerIdentityRequestBody},
-					Response: &awsbase.MockResponse{StatusCode: 200, Body: awsbase.MockStsGetCallerIdentityValidResponseBody, ContentType: "text/xml"},
+					Request:  &servicemocks.MockRequest{Method: "POST", Uri: "/", Body: mockStsGetCallerIdentityRequestBody},
+					Response: &servicemocks.MockResponse{StatusCode: 200, Body: servicemocks.MockStsGetCallerIdentityValidResponseBody, ContentType: "text/xml"},
 				},
 			},
 		},
 		{
 			Config: map[string]interface{}{
-				"bucket":       "tf-test",
-				"external_id":  awsbase.MockStsAssumeRoleExternalId,
+				"bucket":       testBucketPrefix,
+				"external_id":  servicemocks.MockStsAssumeRoleExternalId,
 				"key":          "state",
 				"region":       "us-west-1",
-				"role_arn":     awsbase.MockStsAssumeRoleArn,
-				"session_name": awsbase.MockStsAssumeRoleSessionName,
+				"role_arn":     servicemocks.MockStsAssumeRoleArn,
+				"session_name": servicemocks.MockStsAssumeRoleSessionName,
 			},
 			Description: "external_id",
-			MockStsEndpoints: []*awsbase.MockEndpoint{
+			MockStsEndpoints: []*servicemocks.MockEndpoint{
 				{
-					Request: &awsbase.MockRequest{Method: "POST", Uri: "/", Body: url.Values{
+					Request: &servicemocks.MockRequest{Method: "POST", Uri: "/", Body: url.Values{
 						"Action":          []string{"AssumeRole"},
 						"DurationSeconds": []string{"900"},
-						"ExternalId":      []string{awsbase.MockStsAssumeRoleExternalId},
-						"RoleArn":         []string{awsbase.MockStsAssumeRoleArn},
-						"RoleSessionName": []string{awsbase.MockStsAssumeRoleSessionName},
+						"ExternalId":      []string{servicemocks.MockStsAssumeRoleExternalId},
+						"RoleArn":         []string{servicemocks.MockStsAssumeRoleArn},
+						"RoleSessionName": []string{servicemocks.MockStsAssumeRoleSessionName},
 						"Version":         []string{"2011-06-15"},
 					}.Encode()},
-					Response: &awsbase.MockResponse{StatusCode: 200, Body: awsbase.MockStsAssumeRoleValidResponseBody, ContentType: "text/xml"},
+					Response: &servicemocks.MockResponse{StatusCode: 200, Body: servicemocks.MockStsAssumeRoleValidResponseBody, ContentType: "text/xml"},
 				},
 				{
-					Request:  &awsbase.MockRequest{Method: "POST", Uri: "/", Body: mockStsGetCallerIdentityRequestBody},
-					Response: &awsbase.MockResponse{StatusCode: 200, Body: awsbase.MockStsGetCallerIdentityValidResponseBody, ContentType: "text/xml"},
+					Request:  &servicemocks.MockRequest{Method: "POST", Uri: "/", Body: mockStsGetCallerIdentityRequestBody},
+					Response: &servicemocks.MockResponse{StatusCode: 200, Body: servicemocks.MockStsGetCallerIdentityValidResponseBody, ContentType: "text/xml"},
 				},
 			},
 		},
 		{
 			Config: map[string]interface{}{
-				"assume_role_policy": awsbase.MockStsAssumeRolePolicy,
-				"bucket":             "tf-test",
+				"assume_role_policy": servicemocks.MockStsAssumeRolePolicy,
+				"bucket":             "tofu-test",
 				"key":                "state",
 				"region":             "us-west-1",
-				"role_arn":           awsbase.MockStsAssumeRoleArn,
-				"session_name":       awsbase.MockStsAssumeRoleSessionName,
+				"role_arn":           servicemocks.MockStsAssumeRoleArn,
+				"session_name":       servicemocks.MockStsAssumeRoleSessionName,
 			},
 			Description: "assume_role_policy",
-			MockStsEndpoints: []*awsbase.MockEndpoint{
+			MockStsEndpoints: []*servicemocks.MockEndpoint{
 				{
-					Request: &awsbase.MockRequest{Method: "POST", Uri: "/", Body: url.Values{
+					Request: &servicemocks.MockRequest{Method: "POST", Uri: "/", Body: url.Values{
 						"Action":          []string{"AssumeRole"},
 						"DurationSeconds": []string{"900"},
-						"Policy":          []string{awsbase.MockStsAssumeRolePolicy},
-						"RoleArn":         []string{awsbase.MockStsAssumeRoleArn},
-						"RoleSessionName": []string{awsbase.MockStsAssumeRoleSessionName},
+						"Policy":          []string{servicemocks.MockStsAssumeRolePolicy},
+						"RoleArn":         []string{servicemocks.MockStsAssumeRoleArn},
+						"RoleSessionName": []string{servicemocks.MockStsAssumeRoleSessionName},
 						"Version":         []string{"2011-06-15"},
 					}.Encode()},
-					Response: &awsbase.MockResponse{StatusCode: 200, Body: awsbase.MockStsAssumeRoleValidResponseBody, ContentType: "text/xml"},
+					Response: &servicemocks.MockResponse{StatusCode: 200, Body: servicemocks.MockStsAssumeRoleValidResponseBody, ContentType: "text/xml"},
 				},
 				{
-					Request:  &awsbase.MockRequest{Method: "POST", Uri: "/", Body: mockStsGetCallerIdentityRequestBody},
-					Response: &awsbase.MockResponse{StatusCode: 200, Body: awsbase.MockStsGetCallerIdentityValidResponseBody, ContentType: "text/xml"},
+					Request:  &servicemocks.MockRequest{Method: "POST", Uri: "/", Body: mockStsGetCallerIdentityRequestBody},
+					Response: &servicemocks.MockResponse{StatusCode: 200, Body: servicemocks.MockStsGetCallerIdentityValidResponseBody, ContentType: "text/xml"},
 				},
 			},
 		},
 		{
 			Config: map[string]interface{}{
-				"assume_role_policy_arns": []interface{}{awsbase.MockStsAssumeRolePolicyArn},
-				"bucket":                  "tf-test",
+				"assume_role_policy_arns": []interface{}{servicemocks.MockStsAssumeRolePolicyArn},
+				"bucket":                  "tofu-test",
 				"key":                     "state",
 				"region":                  "us-west-1",
-				"role_arn":                awsbase.MockStsAssumeRoleArn,
-				"session_name":            awsbase.MockStsAssumeRoleSessionName,
+				"role_arn":                servicemocks.MockStsAssumeRoleArn,
+				"session_name":            servicemocks.MockStsAssumeRoleSessionName,
 			},
 			Description: "assume_role_policy_arns",
-			MockStsEndpoints: []*awsbase.MockEndpoint{
+			MockStsEndpoints: []*servicemocks.MockEndpoint{
 				{
-					Request: &awsbase.MockRequest{Method: "POST", Uri: "/", Body: url.Values{
+					Request: &servicemocks.MockRequest{Method: "POST", Uri: "/", Body: url.Values{
 						"Action":                  []string{"AssumeRole"},
 						"DurationSeconds":         []string{"900"},
-						"PolicyArns.member.1.arn": []string{awsbase.MockStsAssumeRolePolicyArn},
-						"RoleArn":                 []string{awsbase.MockStsAssumeRoleArn},
-						"RoleSessionName":         []string{awsbase.MockStsAssumeRoleSessionName},
+						"PolicyArns.member.1.arn": []string{servicemocks.MockStsAssumeRolePolicyArn},
+						"RoleArn":                 []string{servicemocks.MockStsAssumeRoleArn},
+						"RoleSessionName":         []string{servicemocks.MockStsAssumeRoleSessionName},
 						"Version":                 []string{"2011-06-15"},
 					}.Encode()},
-					Response: &awsbase.MockResponse{StatusCode: 200, Body: awsbase.MockStsAssumeRoleValidResponseBody, ContentType: "text/xml"},
+					Response: &servicemocks.MockResponse{StatusCode: 200, Body: servicemocks.MockStsAssumeRoleValidResponseBody, ContentType: "text/xml"},
 				},
 				{
-					Request:  &awsbase.MockRequest{Method: "POST", Uri: "/", Body: mockStsGetCallerIdentityRequestBody},
-					Response: &awsbase.MockResponse{StatusCode: 200, Body: awsbase.MockStsGetCallerIdentityValidResponseBody, ContentType: "text/xml"},
+					Request:  &servicemocks.MockRequest{Method: "POST", Uri: "/", Body: mockStsGetCallerIdentityRequestBody},
+					Response: &servicemocks.MockResponse{StatusCode: 200, Body: servicemocks.MockStsGetCallerIdentityValidResponseBody, ContentType: "text/xml"},
 				},
 			},
 		},
 		{
 			Config: map[string]interface{}{
 				"assume_role_tags": map[string]interface{}{
-					awsbase.MockStsAssumeRoleTagKey: awsbase.MockStsAssumeRoleTagValue,
+					servicemocks.MockStsAssumeRoleTagKey: servicemocks.MockStsAssumeRoleTagValue,
 				},
-				"bucket":       "tf-test",
+				"bucket":       "tofu-test",
 				"key":          "state",
 				"region":       "us-west-1",
-				"role_arn":     awsbase.MockStsAssumeRoleArn,
-				"session_name": awsbase.MockStsAssumeRoleSessionName,
+				"role_arn":     servicemocks.MockStsAssumeRoleArn,
+				"session_name": servicemocks.MockStsAssumeRoleSessionName,
 			},
 			Description: "assume_role_tags",
-			MockStsEndpoints: []*awsbase.MockEndpoint{
+			MockStsEndpoints: []*servicemocks.MockEndpoint{
 				{
-					Request: &awsbase.MockRequest{Method: "POST", Uri: "/", Body: url.Values{
+					Request: &servicemocks.MockRequest{Method: "POST", Uri: "/", Body: url.Values{
 						"Action":              []string{"AssumeRole"},
 						"DurationSeconds":     []string{"900"},
-						"RoleArn":             []string{awsbase.MockStsAssumeRoleArn},
-						"RoleSessionName":     []string{awsbase.MockStsAssumeRoleSessionName},
-						"Tags.member.1.Key":   []string{awsbase.MockStsAssumeRoleTagKey},
-						"Tags.member.1.Value": []string{awsbase.MockStsAssumeRoleTagValue},
+						"RoleArn":             []string{servicemocks.MockStsAssumeRoleArn},
+						"RoleSessionName":     []string{servicemocks.MockStsAssumeRoleSessionName},
+						"Tags.member.1.Key":   []string{servicemocks.MockStsAssumeRoleTagKey},
+						"Tags.member.1.Value": []string{servicemocks.MockStsAssumeRoleTagValue},
 						"Version":             []string{"2011-06-15"},
 					}.Encode()},
-					Response: &awsbase.MockResponse{StatusCode: 200, Body: awsbase.MockStsAssumeRoleValidResponseBody, ContentType: "text/xml"},
+					Response: &servicemocks.MockResponse{StatusCode: 200, Body: servicemocks.MockStsAssumeRoleValidResponseBody, ContentType: "text/xml"},
 				},
 				{
-					Request:  &awsbase.MockRequest{Method: "POST", Uri: "/", Body: mockStsGetCallerIdentityRequestBody},
-					Response: &awsbase.MockResponse{StatusCode: 200, Body: awsbase.MockStsGetCallerIdentityValidResponseBody, ContentType: "text/xml"},
+					Request:  &servicemocks.MockRequest{Method: "POST", Uri: "/", Body: mockStsGetCallerIdentityRequestBody},
+					Response: &servicemocks.MockResponse{StatusCode: 200, Body: servicemocks.MockStsGetCallerIdentityValidResponseBody, ContentType: "text/xml"},
 				},
 			},
 		},
 		{
 			Config: map[string]interface{}{
 				"assume_role_tags": map[string]interface{}{
-					awsbase.MockStsAssumeRoleTagKey: awsbase.MockStsAssumeRoleTagValue,
+					servicemocks.MockStsAssumeRoleTagKey: servicemocks.MockStsAssumeRoleTagValue,
 				},
-				"assume_role_transitive_tag_keys": []interface{}{awsbase.MockStsAssumeRoleTagKey},
-				"bucket":                          "tf-test",
+				"assume_role_transitive_tag_keys": []interface{}{servicemocks.MockStsAssumeRoleTagKey},
+				"bucket":                          "tofu-test",
 				"key":                             "state",
 				"region":                          "us-west-1",
-				"role_arn":                        awsbase.MockStsAssumeRoleArn,
-				"session_name":                    awsbase.MockStsAssumeRoleSessionName,
+				"role_arn":                        servicemocks.MockStsAssumeRoleArn,
+				"session_name":                    servicemocks.MockStsAssumeRoleSessionName,
 			},
 			Description: "assume_role_transitive_tag_keys",
-			MockStsEndpoints: []*awsbase.MockEndpoint{
+			MockStsEndpoints: []*servicemocks.MockEndpoint{
 				{
-					Request: &awsbase.MockRequest{Method: "POST", Uri: "/", Body: url.Values{
+					Request: &servicemocks.MockRequest{Method: "POST", Uri: "/", Body: url.Values{
 						"Action":                     []string{"AssumeRole"},
 						"DurationSeconds":            []string{"900"},
-						"RoleArn":                    []string{awsbase.MockStsAssumeRoleArn},
-						"RoleSessionName":            []string{awsbase.MockStsAssumeRoleSessionName},
-						"Tags.member.1.Key":          []string{awsbase.MockStsAssumeRoleTagKey},
-						"Tags.member.1.Value":        []string{awsbase.MockStsAssumeRoleTagValue},
-						"TransitiveTagKeys.member.1": []string{awsbase.MockStsAssumeRoleTagKey},
+						"RoleArn":                    []string{servicemocks.MockStsAssumeRoleArn},
+						"RoleSessionName":            []string{servicemocks.MockStsAssumeRoleSessionName},
+						"Tags.member.1.Key":          []string{servicemocks.MockStsAssumeRoleTagKey},
+						"Tags.member.1.Value":        []string{servicemocks.MockStsAssumeRoleTagValue},
+						"TransitiveTagKeys.member.1": []string{servicemocks.MockStsAssumeRoleTagKey},
 						"Version":                    []string{"2011-06-15"},
 					}.Encode()},
-					Response: &awsbase.MockResponse{StatusCode: 200, Body: awsbase.MockStsAssumeRoleValidResponseBody, ContentType: "text/xml"},
+					Response: &servicemocks.MockResponse{StatusCode: 200, Body: servicemocks.MockStsAssumeRoleValidResponseBody, ContentType: "text/xml"},
 				},
 				{
-					Request:  &awsbase.MockRequest{Method: "POST", Uri: "/", Body: mockStsGetCallerIdentityRequestBody},
-					Response: &awsbase.MockResponse{StatusCode: 200, Body: awsbase.MockStsGetCallerIdentityValidResponseBody, ContentType: "text/xml"},
+					Request:  &servicemocks.MockRequest{Method: "POST", Uri: "/", Body: mockStsGetCallerIdentityRequestBody},
+					Response: &servicemocks.MockResponse{StatusCode: 200, Body: servicemocks.MockStsGetCallerIdentityValidResponseBody, ContentType: "text/xml"},
 				},
 			},
 		},
@@ -611,18 +589,12 @@ func TestBackendConfig_AssumeRole(t *testing.T) {
 		testCase := testCase
 
 		t.Run(testCase.Description, func(t *testing.T) {
-			closeSts, mockStsSession, err := awsbase.GetMockedAwsApiSession("STS", testCase.MockStsEndpoints)
+			closeSts, _, endpoint := mockdata.GetMockedAwsApiSession("STS", testCase.MockStsEndpoints)
 			defer closeSts()
 
-			if err != nil {
-				t.Fatalf("unexpected error creating mock STS server: %s", err)
-			}
+			testCase.Config["sts_endpoint"] = endpoint
 
-			if mockStsSession != nil && mockStsSession.Config != nil {
-				testCase.Config["sts_endpoint"] = aws.StringValue(mockStsSession.Config.Endpoint)
-			}
-
-			b := New()
+			b := New(encryption.StateEncryptionDisabled())
 			diags := b.Configure(populateSchema(t, b.ConfigSchema(), hcl2shim.HCL2ValueFromConfigValue(testCase.Config)))
 
 			if diags.HasErrors() {
@@ -721,7 +693,7 @@ func TestBackendConfig_PrepareConfigValidation(t *testing.T) {
 			}),
 			expectedErr: `The "workspace_key_prefix" attribute value must not start with "/".`,
 		},
-		"encyrption key conflict": {
+		"encryption key conflict": {
 			config: cty.ObjectVal(map[string]cty.Value{
 				"bucket":               cty.StringVal("test"),
 				"key":                  cty.StringVal("test"),
@@ -732,14 +704,80 @@ func TestBackendConfig_PrepareConfigValidation(t *testing.T) {
 			}),
 			expectedErr: `Only one of "kms_key_id" and "sse_customer_key" can be set`,
 		},
+		"allowed forbidden account ids conflict": {
+			config: cty.ObjectVal(map[string]cty.Value{
+				"bucket":                cty.StringVal("test"),
+				"key":                   cty.StringVal("test"),
+				"region":                cty.StringVal("us-west-2"),
+				"allowed_account_ids":   cty.SetVal([]cty.Value{cty.StringVal("111111111111")}),
+				"forbidden_account_ids": cty.SetVal([]cty.Value{cty.StringVal("111111111111")}),
+			}),
+			expectedErr: "Invalid Attribute Combination: Only one of allowed_account_ids, forbidden_account_ids can be set.",
+		},
+		"invalid retry mode": {
+			config: cty.ObjectVal(map[string]cty.Value{
+				"bucket":     cty.StringVal("test"),
+				"key":        cty.StringVal("test"),
+				"region":     cty.StringVal("us-west-2"),
+				"retry_mode": cty.StringVal("xyz"),
+			}),
+			expectedErr: `Invalid retry mode: Valid values are "standard" and "adaptive".`,
+		},
+		"s3 endpoint conflict": {
+			config: cty.ObjectVal(map[string]cty.Value{
+				"bucket":   cty.StringVal("test"),
+				"key":      cty.StringVal("test"),
+				"region":   cty.StringVal("us-west-2"),
+				"endpoint": cty.StringVal("x1"),
+				"endpoints": cty.ObjectVal(map[string]cty.Value{
+					"s3": cty.StringVal("x2"),
+				}),
+			}),
+			expectedErr: `Invalid Attribute Combination: Only one of endpoints.s3, endpoint can be set.`,
+		},
+		"iam endpoint conflict": {
+			config: cty.ObjectVal(map[string]cty.Value{
+				"bucket":       cty.StringVal("test"),
+				"key":          cty.StringVal("test"),
+				"region":       cty.StringVal("us-west-2"),
+				"iam_endpoint": cty.StringVal("x1"),
+				"endpoints": cty.ObjectVal(map[string]cty.Value{
+					"iam": cty.StringVal("x2"),
+				}),
+			}),
+			expectedErr: `Invalid Attribute Combination: Only one of endpoints.iam, iam_endpoint can be set.`,
+		},
+		"sts endpoint conflict": {
+			config: cty.ObjectVal(map[string]cty.Value{
+				"bucket":       cty.StringVal("test"),
+				"key":          cty.StringVal("test"),
+				"region":       cty.StringVal("us-west-2"),
+				"sts_endpoint": cty.StringVal("x1"),
+				"endpoints": cty.ObjectVal(map[string]cty.Value{
+					"sts": cty.StringVal("x2"),
+				}),
+			}),
+			expectedErr: `Invalid Attribute Combination: Only one of endpoints.sts, sts_endpoint can be set.`,
+		},
+		"dynamodb endpoint conflict": {
+			config: cty.ObjectVal(map[string]cty.Value{
+				"bucket":            cty.StringVal("test"),
+				"key":               cty.StringVal("test"),
+				"region":            cty.StringVal("us-west-2"),
+				"dynamodb_endpoint": cty.StringVal("x1"),
+				"endpoints": cty.ObjectVal(map[string]cty.Value{
+					"dynamodb": cty.StringVal("x2"),
+				}),
+			}),
+			expectedErr: `Invalid Attribute Combination: Only one of endpoints.dynamodb, dynamodb_endpoint can be set.`,
+		},
 	}
 
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			oldEnv := stashEnv()
-			defer popEnv(oldEnv)
+			servicemocks.StashEnv(t)
 
-			b := New()
+			b := New(encryption.StateEncryptionDisabled())
 
 			_, valDiags := b.PrepareConfig(populateSchema(t, b.ConfigSchema(), tc.config))
 			if tc.expectedErr != "" {
@@ -753,6 +791,44 @@ func TestBackendConfig_PrepareConfigValidation(t *testing.T) {
 				}
 			} else if valDiags.Err() != nil {
 				t.Fatalf("expected no error, got %s", valDiags.Err())
+			}
+		})
+	}
+}
+
+func TestBackendConfig_PrepareConfigValidationWarnings(t *testing.T) {
+	cases := map[string]struct {
+		config       cty.Value
+		expectedWarn string
+	}{
+		"deprecated force path style": {
+			config: cty.ObjectVal(map[string]cty.Value{
+				"bucket":           cty.StringVal("test"),
+				"key":              cty.StringVal("test"),
+				"region":           cty.StringVal("us-west-2"),
+				"force_path_style": cty.BoolVal(false),
+			}),
+			expectedWarn: `Deprecated Parameter: Parameter "force_path_style" is deprecated. Use "use_path_style" instead.`,
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			servicemocks.StashEnv(t)
+
+			b := New(encryption.StateEncryptionDisabled())
+
+			_, diags := b.PrepareConfig(populateSchema(t, b.ConfigSchema(), tc.config))
+			if tc.expectedWarn != "" {
+				if err := diags.ErrWithWarnings(); err != nil {
+					if !strings.Contains(err.Error(), tc.expectedWarn) {
+						t.Fatalf("unexpected validation result: %v", err)
+					}
+				} else {
+					t.Fatal("expected a warning, got none")
+				}
+			} else if err := diags.ErrWithWarnings(); err != nil {
+				t.Fatalf("expected no warnings, got %s", err)
 			}
 		})
 	}
@@ -784,7 +860,7 @@ func TestBackendConfig_PrepareConfigWithEnvVars(t *testing.T) {
 				"AWS_DEFAULT_REGION": "us-west-1",
 			},
 		},
-		"encyrption key conflict": {
+		"encryption key conflict": {
 			config: cty.ObjectVal(map[string]cty.Value{
 				"bucket":               cty.StringVal("test"),
 				"key":                  cty.StringVal("test"),
@@ -801,13 +877,12 @@ func TestBackendConfig_PrepareConfigWithEnvVars(t *testing.T) {
 
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			oldEnv := stashEnv()
-			defer popEnv(oldEnv)
+			servicemocks.StashEnv(t)
 
-			b := New()
+			b := New(encryption.StateEncryptionDisabled())
 
 			for k, v := range tc.vars {
-				os.Setenv(k, v)
+				t.Setenv(k, v)
 			}
 
 			_, valDiags := b.PrepareConfig(populateSchema(t, b.ConfigSchema(), tc.config))
@@ -827,21 +902,192 @@ func TestBackendConfig_PrepareConfigWithEnvVars(t *testing.T) {
 	}
 }
 
+// TestBackendConfig_proxy tests proxy configuration
+func TestBackendConfig_proxy(t *testing.T) {
+	testACC(t)
+
+	newURL := func(rawURL string) *url.URL {
+		o, err := url.Parse(rawURL)
+		if err != nil {
+			panic(err)
+		}
+		return o
+	}
+
+	cases := map[string]struct {
+		config       cty.Value
+		calledURL    string
+		envVars      map[string]string
+		wantProxyURL *url.URL
+
+		// wantErrSubstr contains the part indicating proxy address
+		wantErrSubstr string
+	}{
+		"shall set proxy using http_proxy config attr": {
+			config: cty.ObjectVal(map[string]cty.Value{
+				"bucket":     cty.StringVal("test"),
+				"key":        cty.StringVal("test"),
+				"http_proxy": cty.StringVal("http://foo.bar"),
+			}),
+			calledURL:    "http://qux.quxx",
+			wantProxyURL: newURL("http://foo.bar"),
+		},
+		"shall set proxy using HTTP_PROXY envvar": {
+			config: cty.ObjectVal(map[string]cty.Value{
+				"bucket": cty.StringVal("test"),
+				"key":    cty.StringVal("test"),
+			}),
+			envVars: map[string]string{
+				"HTTP_PROXY": "http://foo.com",
+			},
+			calledURL:    "http://qux.quxx",
+			wantProxyURL: newURL("http://foo.com"),
+		},
+		"shall set proxy using http_proxy config attr when HTTP_PROXY envvar is also set": {
+			config: cty.ObjectVal(map[string]cty.Value{
+				"bucket":     cty.StringVal("test"),
+				"key":        cty.StringVal("test"),
+				"http_proxy": cty.StringVal("http://foo.bar"),
+			}),
+			envVars: map[string]string{
+				"HTTP_PROXY": "http://foo.com",
+			},
+			calledURL:    "http://qux.quxx",
+			wantProxyURL: newURL("http://foo.bar"),
+		},
+		"shall set proxy using https_proxy config attr": {
+			config: cty.ObjectVal(map[string]cty.Value{
+				"bucket":      cty.StringVal("test"),
+				"key":         cty.StringVal("test"),
+				"https_proxy": cty.StringVal("https://foo.bar"),
+			}),
+			calledURL:     "https://qux.quxx",
+			wantErrSubstr: "proxyconnect tcp: dial tcp: lookup foo.bar",
+		},
+		"shall set proxy using HTTPS_PROXY envvar": {
+			config: cty.ObjectVal(map[string]cty.Value{
+				"bucket": cty.StringVal("test"),
+				"key":    cty.StringVal("test"),
+			}),
+			envVars: map[string]string{
+				"HTTPS_PROXY": "https://foo.baz",
+			},
+			calledURL:     "https://qux.quxx",
+			wantErrSubstr: "proxyconnect tcp: dial tcp: lookup foo.baz",
+		},
+		"shall set proxy using https_proxy config attr when HTTPS_PROXY envvar is also set": {
+			config: cty.ObjectVal(map[string]cty.Value{
+				"bucket":      cty.StringVal("test"),
+				"key":         cty.StringVal("test"),
+				"https_proxy": cty.StringVal("https://foo.bar"),
+			}),
+			envVars: map[string]string{
+				"HTTPS_PROXY": "https://foo.com",
+			},
+			calledURL:     "https://qux.quxx",
+			wantErrSubstr: "proxyconnect tcp: dial tcp: lookup foo.bar",
+		},
+		"shall satisfy no_proxy config attr": {
+			config: cty.ObjectVal(map[string]cty.Value{
+				"bucket":   cty.StringVal("test"),
+				"key":      cty.StringVal("test"),
+				"no_proxy": cty.StringVal("http://foo.bar,1.2.3.4"),
+			}),
+			calledURL: "http://foo.bar",
+		},
+		"shall satisfy no proxy set using NO_PROXY envvar": {
+			config: cty.ObjectVal(map[string]cty.Value{
+				"bucket": cty.StringVal("test"),
+				"key":    cty.StringVal("test"),
+			}),
+			envVars: map[string]string{
+				"NO_PROXY": "http://foo.bar,1.2.3.4",
+			},
+			calledURL: "http://foo.bar",
+		},
+		"shall satisfy no_proxy config attr when envvar NO_PROXY is also set": {
+			config: cty.ObjectVal(map[string]cty.Value{
+				"bucket":   cty.StringVal("test"),
+				"key":      cty.StringVal("test"),
+				"no_proxy": cty.StringVal("http://foo.qux,1.2.3.4"),
+			}),
+			envVars: map[string]string{
+				"NO_PROXY": "http://foo.bar",
+			},
+			calledURL: "http://foo.qux",
+		},
+		"shall satisfy use http_proxy when no_proxy is also set to identical value": {
+			config: cty.ObjectVal(map[string]cty.Value{
+				"bucket":     cty.StringVal("test"),
+				"key":        cty.StringVal("test"),
+				"http_proxy": cty.StringVal("http://foo.bar"),
+				"no_proxy":   cty.StringVal("http://foo.bar"),
+			}),
+			calledURL:    "http://qux.quxx",
+			wantProxyURL: newURL("http://foo.bar"),
+		},
+		"shall satisfy use https_proxy when no_proxy is also set to identical value": {
+			config: cty.ObjectVal(map[string]cty.Value{
+				"bucket":      cty.StringVal("test"),
+				"key":         cty.StringVal("test"),
+				"https_proxy": cty.StringVal("https://foo.bar"),
+				"no_proxy":    cty.StringVal("http://foo.bar"),
+			}),
+			calledURL:     "https://qux.quxx",
+			wantErrSubstr: "proxyconnect tcp: dial tcp: lookup foo.bar",
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			for k, v := range tc.envVars {
+				t.Setenv(k, v)
+			}
+
+			b := New(encryption.StateEncryptionDisabled())
+
+			got := b.Configure(populateSchema(t, b.ConfigSchema(), tc.config))
+			if got.HasErrors() != (tc.wantErrSubstr != "") {
+				t.Fatalf("unexpected error: %v", got.Err())
+			}
+
+			switch got.HasErrors() {
+			case true:
+				if !strings.Contains(got.Err().Error(), tc.wantErrSubstr) {
+					t.Fatalf("unexpected error: want= %s, got= %s", tc.wantErrSubstr, got.Err().Error())
+				}
+			case false:
+				gotProxyURL, err := b.(*Backend).awsConfig.HTTPClient.(*awshttp.BuildableClient).GetTransport().Proxy(&http.Request{
+					URL: newURL(tc.calledURL),
+				})
+				if err != nil {
+					t.Fatalf("unexpected err: %v", err)
+				}
+
+				if !reflect.DeepEqual(gotProxyURL, tc.wantProxyURL) {
+					t.Fatalf("unexpected proxy URL: want= %s, got= %s", tc.wantProxyURL, gotProxyURL)
+				}
+			}
+		})
+	}
+}
+
 func TestBackend(t *testing.T) {
 	testACC(t)
 
-	bucketName := fmt.Sprintf("terraform-remote-s3-test-%x", time.Now().Unix())
+	bucketName := fmt.Sprintf("%s-%x", testBucketPrefix, time.Now().Unix())
 	keyName := "testState"
 
-	b := backend.TestBackendConfig(t, New(), backend.TestWrapConfig(map[string]interface{}{
+	b := backend.TestBackendConfig(t, New(encryption.StateEncryptionDisabled()), backend.TestWrapConfig(map[string]interface{}{
 		"bucket":  bucketName,
 		"key":     keyName,
 		"encrypt": true,
 		"region":  "us-west-1",
 	})).(*Backend)
 
-	createS3Bucket(t, b.s3Client, bucketName)
-	defer deleteS3Bucket(t, b.s3Client, bucketName)
+	ctx := context.TODO()
+	createS3Bucket(ctx, t, b.s3Client, bucketName, b.awsConfig.Region)
+	defer deleteS3Bucket(ctx, t, b.s3Client, bucketName)
 
 	backend.TestBackendStates(t, b)
 }
@@ -849,10 +1095,10 @@ func TestBackend(t *testing.T) {
 func TestBackendLocked(t *testing.T) {
 	testACC(t)
 
-	bucketName := fmt.Sprintf("terraform-remote-s3-test-%x", time.Now().Unix())
+	bucketName := fmt.Sprintf("%s-%x", testBucketPrefix, time.Now().Unix())
 	keyName := "test/state"
 
-	b1 := backend.TestBackendConfig(t, New(), backend.TestWrapConfig(map[string]interface{}{
+	b1 := backend.TestBackendConfig(t, New(encryption.StateEncryptionDisabled()), backend.TestWrapConfig(map[string]interface{}{
 		"bucket":         bucketName,
 		"key":            keyName,
 		"encrypt":        true,
@@ -860,7 +1106,7 @@ func TestBackendLocked(t *testing.T) {
 		"region":         "us-west-1",
 	})).(*Backend)
 
-	b2 := backend.TestBackendConfig(t, New(), backend.TestWrapConfig(map[string]interface{}{
+	b2 := backend.TestBackendConfig(t, New(encryption.StateEncryptionDisabled()), backend.TestWrapConfig(map[string]interface{}{
 		"bucket":         bucketName,
 		"key":            keyName,
 		"encrypt":        true,
@@ -868,10 +1114,11 @@ func TestBackendLocked(t *testing.T) {
 		"region":         "us-west-1",
 	})).(*Backend)
 
-	createS3Bucket(t, b1.s3Client, bucketName)
-	defer deleteS3Bucket(t, b1.s3Client, bucketName)
-	createDynamoDBTable(t, b1.dynClient, bucketName)
-	defer deleteDynamoDBTable(t, b1.dynClient, bucketName)
+	ctx := context.TODO()
+	createS3Bucket(ctx, t, b1.s3Client, bucketName, b1.awsConfig.Region)
+	defer deleteS3Bucket(ctx, t, b1.s3Client, bucketName)
+	createDynamoDBTable(ctx, t, b1.dynClient, bucketName)
+	defer deleteDynamoDBTable(ctx, t, b1.dynClient, bucketName)
 
 	backend.TestBackendStateLocks(t, b1, b2)
 	backend.TestBackendStateForceUnlock(t, b1, b2)
@@ -901,7 +1148,7 @@ func TestBackendSSECustomerKeyConfig(t *testing.T) {
 		testCase := testCase
 
 		t.Run(name, func(t *testing.T) {
-			bucketName := fmt.Sprintf("terraform-remote-s3-test-%x", time.Now().Unix())
+			bucketName := fmt.Sprintf("%s-%x", testBucketPrefix, time.Now().Unix())
 			config := map[string]interface{}{
 				"bucket":           bucketName,
 				"encrypt":          true,
@@ -910,7 +1157,7 @@ func TestBackendSSECustomerKeyConfig(t *testing.T) {
 				"region":           "us-west-1",
 			}
 
-			b := New().(*Backend)
+			b := New(encryption.StateEncryptionDisabled()).(*Backend)
 			diags := b.Configure(populateSchema(t, b.ConfigSchema(), hcl2shim.HCL2ValueFromConfigValue(config)))
 
 			if testCase.expectedErr != "" {
@@ -930,8 +1177,9 @@ func TestBackendSSECustomerKeyConfig(t *testing.T) {
 					t.Fatal("unexpected value for customer encryption key")
 				}
 
-				createS3Bucket(t, b.s3Client, bucketName)
-				defer deleteS3Bucket(t, b.s3Client, bucketName)
+				ctx := context.TODO()
+				createS3Bucket(ctx, t, b.s3Client, bucketName, b.awsConfig.Region)
+				defer deleteS3Bucket(ctx, t, b.s3Client, bucketName)
 
 				backend.TestBackendStates(t, b)
 			}
@@ -963,7 +1211,7 @@ func TestBackendSSECustomerKeyEnvVar(t *testing.T) {
 		testCase := testCase
 
 		t.Run(name, func(t *testing.T) {
-			bucketName := fmt.Sprintf("terraform-remote-s3-test-%x", time.Now().Unix())
+			bucketName := fmt.Sprintf("%s-%x", testBucketPrefix, time.Now().Unix())
 			config := map[string]interface{}{
 				"bucket":  bucketName,
 				"encrypt": true,
@@ -971,12 +1219,9 @@ func TestBackendSSECustomerKeyEnvVar(t *testing.T) {
 				"region":  "us-west-1",
 			}
 
-			os.Setenv("AWS_SSE_CUSTOMER_KEY", testCase.customerKey)
-			t.Cleanup(func() {
-				os.Unsetenv("AWS_SSE_CUSTOMER_KEY")
-			})
+			t.Setenv("AWS_SSE_CUSTOMER_KEY", testCase.customerKey)
 
-			b := New().(*Backend)
+			b := New(encryption.StateEncryptionDisabled()).(*Backend)
 			diags := b.Configure(populateSchema(t, b.ConfigSchema(), hcl2shim.HCL2ValueFromConfigValue(config)))
 
 			if testCase.expectedErr != "" {
@@ -996,8 +1241,9 @@ func TestBackendSSECustomerKeyEnvVar(t *testing.T) {
 					t.Fatal("unexpected value for customer encryption key")
 				}
 
-				createS3Bucket(t, b.s3Client, bucketName)
-				defer deleteS3Bucket(t, b.s3Client, bucketName)
+				ctx := context.TODO()
+				createS3Bucket(ctx, t, b.s3Client, bucketName, b.awsConfig.Region)
+				defer deleteS3Bucket(ctx, t, b.s3Client, bucketName)
 
 				backend.TestBackendStates(t, b)
 			}
@@ -1008,17 +1254,18 @@ func TestBackendSSECustomerKeyEnvVar(t *testing.T) {
 // add some extra junk in S3 to try and confuse the env listing.
 func TestBackendExtraPaths(t *testing.T) {
 	testACC(t)
-	bucketName := fmt.Sprintf("terraform-remote-s3-test-%x", time.Now().Unix())
+	bucketName := fmt.Sprintf("%s-%x", testBucketPrefix, time.Now().Unix())
 	keyName := "test/state/tfstate"
 
-	b := backend.TestBackendConfig(t, New(), backend.TestWrapConfig(map[string]interface{}{
+	b := backend.TestBackendConfig(t, New(encryption.StateEncryptionDisabled()), backend.TestWrapConfig(map[string]interface{}{
 		"bucket":  bucketName,
 		"key":     keyName,
 		"encrypt": true,
 	})).(*Backend)
 
-	createS3Bucket(t, b.s3Client, bucketName)
-	defer deleteS3Bucket(t, b.s3Client, bucketName)
+	ctx := context.TODO()
+	createS3Bucket(ctx, t, b.s3Client, bucketName, b.awsConfig.Region)
+	defer deleteS3Bucket(ctx, t, b.s3Client, bucketName)
 
 	// put multiple states in old env paths.
 	s1 := states.NewState()
@@ -1037,7 +1284,7 @@ func TestBackendExtraPaths(t *testing.T) {
 	}
 
 	// Write the first state
-	stateMgr := &remote.State{Client: client}
+	stateMgr := remote.NewState(client, encryption.StateEncryptionDisabled())
 	if err := stateMgr.WriteState(s1); err != nil {
 		t.Fatal(err)
 	}
@@ -1049,7 +1296,7 @@ func TestBackendExtraPaths(t *testing.T) {
 	// Note a new state manager - otherwise, because these
 	// states are equal, the state will not Put to the remote
 	client.path = b.path("s2")
-	stateMgr2 := &remote.State{Client: client}
+	stateMgr2 := remote.NewState(client, encryption.StateEncryptionDisabled())
 	if err := stateMgr2.WriteState(s2); err != nil {
 		t.Fatal(err)
 	}
@@ -1147,16 +1394,17 @@ func TestBackendExtraPaths(t *testing.T) {
 // of the workspace name itself.
 func TestBackendPrefixInWorkspace(t *testing.T) {
 	testACC(t)
-	bucketName := fmt.Sprintf("terraform-remote-s3-test-%x", time.Now().Unix())
+	bucketName := fmt.Sprintf("%s-%x", testBucketPrefix, time.Now().Unix())
 
-	b := backend.TestBackendConfig(t, New(), backend.TestWrapConfig(map[string]interface{}{
+	b := backend.TestBackendConfig(t, New(encryption.StateEncryptionDisabled()), backend.TestWrapConfig(map[string]interface{}{
 		"bucket":               bucketName,
 		"key":                  "test-env.tfstate",
 		"workspace_key_prefix": "env",
 	})).(*Backend)
 
-	createS3Bucket(t, b.s3Client, bucketName)
-	defer deleteS3Bucket(t, b.s3Client, bucketName)
+	ctx := context.TODO()
+	createS3Bucket(ctx, t, b.s3Client, bucketName, b.awsConfig.Region)
+	defer deleteS3Bucket(ctx, t, b.s3Client, bucketName)
 
 	// get a state that contains the prefix as a substring
 	sMgr, err := b.StateMgr("env-1")
@@ -1176,37 +1424,38 @@ func TestKeyEnv(t *testing.T) {
 	testACC(t)
 	keyName := "some/paths/tfstate"
 
-	bucket0Name := fmt.Sprintf("terraform-remote-s3-test-%x-0", time.Now().Unix())
-	b0 := backend.TestBackendConfig(t, New(), backend.TestWrapConfig(map[string]interface{}{
+	bucket0Name := fmt.Sprintf("%s-%x-0", testBucketPrefix, time.Now().Unix())
+	b0 := backend.TestBackendConfig(t, New(encryption.StateEncryptionDisabled()), backend.TestWrapConfig(map[string]interface{}{
 		"bucket":               bucket0Name,
 		"key":                  keyName,
 		"encrypt":              true,
 		"workspace_key_prefix": "",
 	})).(*Backend)
 
-	createS3Bucket(t, b0.s3Client, bucket0Name)
-	defer deleteS3Bucket(t, b0.s3Client, bucket0Name)
+	ctx := context.TODO()
+	createS3Bucket(ctx, t, b0.s3Client, bucket0Name, b0.awsConfig.Region)
+	defer deleteS3Bucket(ctx, t, b0.s3Client, bucket0Name)
 
-	bucket1Name := fmt.Sprintf("terraform-remote-s3-test-%x-1", time.Now().Unix())
-	b1 := backend.TestBackendConfig(t, New(), backend.TestWrapConfig(map[string]interface{}{
+	bucket1Name := fmt.Sprintf("%s-%x-1", testBucketPrefix, time.Now().Unix())
+	b1 := backend.TestBackendConfig(t, New(encryption.StateEncryptionDisabled()), backend.TestWrapConfig(map[string]interface{}{
 		"bucket":               bucket1Name,
 		"key":                  keyName,
 		"encrypt":              true,
 		"workspace_key_prefix": "project/env:",
 	})).(*Backend)
 
-	createS3Bucket(t, b1.s3Client, bucket1Name)
-	defer deleteS3Bucket(t, b1.s3Client, bucket1Name)
+	createS3Bucket(ctx, t, b1.s3Client, bucket1Name, b1.awsConfig.Region)
+	defer deleteS3Bucket(ctx, t, b1.s3Client, bucket1Name)
 
-	bucket2Name := fmt.Sprintf("terraform-remote-s3-test-%x-2", time.Now().Unix())
-	b2 := backend.TestBackendConfig(t, New(), backend.TestWrapConfig(map[string]interface{}{
+	bucket2Name := fmt.Sprintf("%s-%x-2", testBucketPrefix, time.Now().Unix())
+	b2 := backend.TestBackendConfig(t, New(encryption.StateEncryptionDisabled()), backend.TestWrapConfig(map[string]interface{}{
 		"bucket":  bucket2Name,
 		"key":     keyName,
 		"encrypt": true,
 	})).(*Backend)
 
-	createS3Bucket(t, b2.s3Client, bucket2Name)
-	defer deleteS3Bucket(t, b2.s3Client, bucket2Name)
+	createS3Bucket(ctx, t, b2.s3Client, bucket2Name, b2.awsConfig.Region)
+	defer deleteS3Bucket(ctx, t, b2.s3Client, bucket2Name)
 
 	if err := testGetWorkspaceForKey(b0, "some/paths/tfstate", ""); err != nil {
 		t.Fatal(err)
@@ -1233,6 +1482,109 @@ func TestKeyEnv(t *testing.T) {
 	backend.TestBackendStates(t, b2)
 }
 
+func Test_pathString(t *testing.T) {
+	tests := []struct {
+		name     string
+		path     cty.Path
+		expected string
+	}{
+		{
+			name:     "Simple Path",
+			path:     cty.Path{cty.GetAttrStep{Name: "attr"}},
+			expected: "attr",
+		},
+		{
+			name: "Nested Path",
+			path: cty.Path{
+				cty.GetAttrStep{Name: "parent"},
+				cty.GetAttrStep{Name: "child"},
+			},
+			expected: "parent.child",
+		},
+		{
+			name: "Indexed Path",
+			path: cty.Path{
+				cty.GetAttrStep{Name: "array"},
+				cty.IndexStep{Key: cty.NumberIntVal(0)},
+			},
+			expected: "array[0]",
+		},
+		{
+			name: "Mixed Path",
+			path: cty.Path{
+				cty.GetAttrStep{Name: "parent"},
+				cty.IndexStep{Key: cty.StringVal("key")},
+				cty.GetAttrStep{Name: "child"},
+			},
+			expected: "parent[key].child",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			result := pathString(test.path)
+			if result != test.expected {
+				t.Errorf("Expected: %s, Got: %s", test.expected, result)
+			}
+		})
+	}
+}
+
+func TestBackend_includeProtoIfNecessary(t *testing.T) {
+	tests := []struct {
+		name     string
+		provided string
+		expected string
+	}{
+		{
+			name:     "Unmodified S3",
+			provided: "https://s3.us-east-1.amazonaws.com",
+			expected: "https://s3.us-east-1.amazonaws.com",
+		},
+		{
+			name:     "Modified S3",
+			provided: "s3.us-east-1.amazonaws.com",
+			expected: "https://s3.us-east-1.amazonaws.com",
+		},
+		{
+			name:     "Unmodified With Port",
+			provided: "http://localhost:9000/",
+			expected: "http://localhost:9000/",
+		},
+		{
+			name:     "Modified With Port",
+			provided: "localhost:9000/",
+			expected: "https://localhost:9000/",
+		},
+		{
+			name:     "Umodified with strange proto",
+			provided: "ftp://localhost:9000/",
+			expected: "ftp://localhost:9000/",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			result := includeProtoIfNecessary(test.provided)
+			if result != test.expected {
+				t.Errorf("Expected: %s, Got: %s", test.expected, result)
+			}
+		})
+	}
+}
+
+func TestBackend_schemaCoercionMinimal(t *testing.T) {
+	example := cty.ObjectVal(map[string]cty.Value{
+		"bucket": cty.StringVal("my-bucket"),
+		"key":    cty.StringVal("state.tf"),
+	})
+	schema := New(encryption.StateEncryptionDisabled()).ConfigSchema()
+	_, err := schema.CoerceValue(example)
+	if err != nil {
+		t.Errorf("Unexpected error: %s", err.Error())
+	}
+}
+
 func testGetWorkspaceForKey(b *Backend, key string, expected string) error {
 	if actual := b.keyEnv(key); actual != expected {
 		return fmt.Errorf("incorrect workspace for key[%q]. Expected[%q]: Actual[%q]", key, expected, actual)
@@ -1252,65 +1604,74 @@ func checkStateList(b backend.Backend, expected []string) error {
 	return nil
 }
 
-func createS3Bucket(t *testing.T, s3Client *s3.S3, bucketName string) {
+func createS3Bucket(ctx context.Context, t *testing.T, s3Client *s3.Client, bucketName, region string) {
 	createBucketReq := &s3.CreateBucketInput{
 		Bucket: &bucketName,
 	}
 
+	// Regions outside of us-east-1 require the appropriate LocationConstraint
+	// to be specified in order to create the bucket in the desired region.
+	// https://docs.aws.amazon.com/cli/latest/reference/s3api/create-bucket.html
+	if region != "us-east-1" {
+		createBucketReq.CreateBucketConfiguration = &types.CreateBucketConfiguration{
+			LocationConstraint: types.BucketLocationConstraint(region),
+		}
+	}
+
 	// Be clear about what we're doing in case the user needs to clean
 	// this up later.
-	t.Logf("creating S3 bucket %s in %s", bucketName, aws.StringValue(s3Client.Config.Region))
-	_, err := s3Client.CreateBucket(createBucketReq)
+	t.Logf("creating S3 bucket %s in %s", bucketName, region)
+	_, err := s3Client.CreateBucket(ctx, createBucketReq)
 	if err != nil {
 		t.Fatal("failed to create test S3 bucket:", err)
 	}
 }
 
-func deleteS3Bucket(t *testing.T, s3Client *s3.S3, bucketName string) {
+func deleteS3Bucket(ctx context.Context, t *testing.T, s3Client *s3.Client, bucketName string) {
 	warning := "WARNING: Failed to delete the test S3 bucket. It may have been left in your AWS account and may incur storage charges. (error was %s)"
 
 	// first we have to get rid of the env objects, or we can't delete the bucket
-	resp, err := s3Client.ListObjects(&s3.ListObjectsInput{Bucket: &bucketName})
+	resp, err := s3Client.ListObjects(ctx, &s3.ListObjectsInput{Bucket: &bucketName})
 	if err != nil {
 		t.Logf(warning, err)
 		return
 	}
 	for _, obj := range resp.Contents {
-		if _, err := s3Client.DeleteObject(&s3.DeleteObjectInput{Bucket: &bucketName, Key: obj.Key}); err != nil {
+		if _, err := s3Client.DeleteObject(ctx, &s3.DeleteObjectInput{Bucket: &bucketName, Key: obj.Key}); err != nil {
 			// this will need cleanup no matter what, so just warn and exit
 			t.Logf(warning, err)
 			return
 		}
 	}
 
-	if _, err := s3Client.DeleteBucket(&s3.DeleteBucketInput{Bucket: &bucketName}); err != nil {
+	if _, err := s3Client.DeleteBucket(ctx, &s3.DeleteBucketInput{Bucket: &bucketName}); err != nil {
 		t.Logf(warning, err)
 	}
 }
 
 // create the dynamoDB table, and wait until we can query it.
-func createDynamoDBTable(t *testing.T, dynClient *dynamodb.DynamoDB, tableName string) {
+func createDynamoDBTable(ctx context.Context, t *testing.T, dynClient *dynamodb.Client, tableName string) {
 	createInput := &dynamodb.CreateTableInput{
-		AttributeDefinitions: []*dynamodb.AttributeDefinition{
+		AttributeDefinitions: []dtypes.AttributeDefinition{
 			{
 				AttributeName: aws.String("LockID"),
-				AttributeType: aws.String("S"),
+				AttributeType: dtypes.ScalarAttributeTypeS,
 			},
 		},
-		KeySchema: []*dynamodb.KeySchemaElement{
+		KeySchema: []dtypes.KeySchemaElement{
 			{
 				AttributeName: aws.String("LockID"),
-				KeyType:       aws.String("HASH"),
+				KeyType:       dtypes.KeyTypeHash,
 			},
 		},
-		ProvisionedThroughput: &dynamodb.ProvisionedThroughput{
+		ProvisionedThroughput: &dtypes.ProvisionedThroughput{
 			ReadCapacityUnits:  aws.Int64(5),
 			WriteCapacityUnits: aws.Int64(5),
 		},
 		TableName: aws.String(tableName),
 	}
 
-	_, err := dynClient.CreateTable(createInput)
+	_, err := dynClient.CreateTable(ctx, createInput)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1324,12 +1685,12 @@ func createDynamoDBTable(t *testing.T, dynClient *dynamodb.DynamoDB, tableName s
 	}
 
 	for {
-		resp, err := dynClient.DescribeTable(describeInput)
+		resp, err := dynClient.DescribeTable(ctx, describeInput)
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		if *resp.Table.TableStatus == "ACTIVE" {
+		if resp.Table.TableStatus == dtypes.TableStatusActive {
 			return
 		}
 
@@ -1342,13 +1703,26 @@ func createDynamoDBTable(t *testing.T, dynClient *dynamodb.DynamoDB, tableName s
 
 }
 
-func deleteDynamoDBTable(t *testing.T, dynClient *dynamodb.DynamoDB, tableName string) {
+func deleteDynamoDBTable(ctx context.Context, t *testing.T, dynClient *dynamodb.Client, tableName string) {
 	params := &dynamodb.DeleteTableInput{
 		TableName: aws.String(tableName),
 	}
-	_, err := dynClient.DeleteTable(params)
+	_, err := dynClient.DeleteTable(ctx, params)
 	if err != nil {
 		t.Logf("WARNING: Failed to delete the test DynamoDB table %q. It has been left in your AWS account and may incur charges. (error was %s)", tableName, err)
+	}
+}
+
+func deleteDynamoEntry(ctx context.Context, t *testing.T, dynClient *dynamodb.Client, tableName string, lockId string) {
+	params := &dynamodb.DeleteItemInput{
+		Key: map[string]dtypes.AttributeValue{
+			"LockID": &dtypes.AttributeValueMemberS{Value: lockId},
+		},
+		TableName: aws.String(tableName),
+	}
+	_, err := dynClient.DeleteItem(ctx, params)
+	if err != nil {
+		t.Logf("WARNING: Failed to delete DynamoDB item %q from table %q. (error was %s)", lockId, tableName, err)
 	}
 }
 
@@ -1447,6 +1821,14 @@ func unmarshalObject(dec cty.Value, atys map[string]cty.Type, path cty.Path) (ct
 	}
 
 	return cty.ObjectVal(vals), nil
+}
+
+func numberOfObjectsInBucket(t *testing.T, ctx context.Context, s3Client *s3.Client, bucketName string) int {
+	resp, err := s3Client.ListObjects(ctx, &s3.ListObjectsInput{Bucket: &bucketName})
+	if err != nil {
+		t.Fatalf("error getting objects from bucket %s: %v", bucketName, err)
+	}
+	return len(resp.Contents)
 }
 
 func must[T any](v T, err error) T {

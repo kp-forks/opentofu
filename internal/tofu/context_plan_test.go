@@ -1,13 +1,17 @@
-// Copyright (c) HashiCorp, Inc.
+// Copyright (c) The OpenTofu Authors
+// SPDX-License-Identifier: MPL-2.0
+// Copyright (c) 2023 HashiCorp, Inc.
 // SPDX-License-Identifier: MPL-2.0
 
 package tofu
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"reflect"
 	"sort"
 	"strings"
@@ -39,7 +43,7 @@ func TestContext2Plan_basic(t *testing.T) {
 		},
 	})
 
-	plan, diags := ctx.Plan(m, states.NewState(), DefaultPlanOpts)
+	plan, diags := ctx.Plan(context.Background(), m, states.NewState(), DefaultPlanOpts)
 	if diags.HasErrors() {
 		t.Fatalf("unexpected errors: %s", diags.Err())
 	}
@@ -91,7 +95,8 @@ func TestContext2Plan_createBefore_deposed(t *testing.T) {
 			Status:    states.ObjectReady,
 			AttrsJSON: []byte(`{"id":"baz","type":"aws_instance"}`),
 		},
-		mustProviderConfig(`provider["registry.terraform.io/hashicorp/aws"]`),
+		mustProviderConfig(`provider["registry.opentofu.org/hashicorp/aws"]`),
+		addrs.NoKey,
 	)
 	root.SetResourceInstanceDeposed(
 		mustResourceInstanceAddr("aws_instance.foo").Resource,
@@ -100,7 +105,8 @@ func TestContext2Plan_createBefore_deposed(t *testing.T) {
 			Status:    states.ObjectReady,
 			AttrsJSON: []byte(`{"id":"foo"}`),
 		},
-		mustProviderConfig(`provider["registry.terraform.io/hashicorp/aws"]`),
+		mustProviderConfig(`provider["registry.opentofu.org/hashicorp/aws"]`),
+		addrs.NoKey,
 	)
 
 	ctx := testContext2(t, &ContextOpts{
@@ -109,7 +115,7 @@ func TestContext2Plan_createBefore_deposed(t *testing.T) {
 		},
 	})
 
-	plan, diags := ctx.Plan(m, state, DefaultPlanOpts)
+	plan, diags := ctx.Plan(context.Background(), m, state, DefaultPlanOpts)
 	if diags.HasErrors() {
 		t.Fatalf("unexpected errors: %s", diags.Err())
 	}
@@ -118,7 +124,7 @@ func TestContext2Plan_createBefore_deposed(t *testing.T) {
 	expectedState := strings.TrimSpace(`
  aws_instance.foo: (1 deposed)
   ID = baz
-  provider = provider["registry.terraform.io/hashicorp/aws"]
+  provider = provider["registry.opentofu.org/hashicorp/aws"]
   type = aws_instance
   Deposed ID 1 = foo`)
 
@@ -200,7 +206,7 @@ func TestContext2Plan_createBefore_maintainRoot(t *testing.T) {
 		},
 	})
 
-	plan, diags := ctx.Plan(m, states.NewState(), DefaultPlanOpts)
+	plan, diags := ctx.Plan(context.Background(), m, states.NewState(), DefaultPlanOpts)
 	if diags.HasErrors() {
 		t.Fatalf("unexpected errors: %s", diags.Err())
 	}
@@ -235,7 +241,7 @@ func TestContext2Plan_emptyDiff(t *testing.T) {
 		},
 	})
 
-	plan, diags := ctx.Plan(m, states.NewState(), DefaultPlanOpts)
+	plan, diags := ctx.Plan(context.Background(), m, states.NewState(), DefaultPlanOpts)
 	if diags.HasErrors() {
 		t.Fatalf("unexpected errors: %s", diags.Err())
 	}
@@ -273,7 +279,7 @@ func TestContext2Plan_escapedVar(t *testing.T) {
 		},
 	})
 
-	plan, diags := ctx.Plan(m, states.NewState(), DefaultPlanOpts)
+	plan, diags := ctx.Plan(context.Background(), m, states.NewState(), DefaultPlanOpts)
 	if diags.HasErrors() {
 		t.Fatalf("unexpected errors: %s", diags.Err())
 	}
@@ -313,7 +319,7 @@ func TestContext2Plan_minimal(t *testing.T) {
 		},
 	})
 
-	plan, diags := ctx.Plan(m, states.NewState(), DefaultPlanOpts)
+	plan, diags := ctx.Plan(context.Background(), m, states.NewState(), DefaultPlanOpts)
 	if diags.HasErrors() {
 		t.Fatalf("unexpected errors: %s", diags.Err())
 	}
@@ -351,7 +357,7 @@ func TestContext2Plan_modules(t *testing.T) {
 		},
 	})
 
-	plan, diags := ctx.Plan(m, states.NewState(), DefaultPlanOpts)
+	plan, diags := ctx.Plan(context.Background(), m, states.NewState(), DefaultPlanOpts)
 	if diags.HasErrors() {
 		t.Fatalf("unexpected errors: %s", diags.Err())
 	}
@@ -409,7 +415,7 @@ func TestContext2Plan_moduleExpand(t *testing.T) {
 		},
 	})
 
-	plan, diags := ctx.Plan(m, states.NewState(), SimplePlanOpts(plans.NormalMode, testInputValuesUnset(m.Module.Variables)))
+	plan, diags := ctx.Plan(context.Background(), m, states.NewState(), SimplePlanOpts(plans.NormalMode, testInputValuesUnset(m.Module.Variables)))
 	if diags.HasErrors() {
 		t.Fatalf("unexpected errors: %s", diags.Err())
 	}
@@ -469,7 +475,7 @@ func TestContext2Plan_moduleCycle(t *testing.T) {
 		},
 	})
 
-	plan, diags := ctx.Plan(m, states.NewState(), DefaultPlanOpts)
+	plan, diags := ctx.Plan(context.Background(), m, states.NewState(), DefaultPlanOpts)
 	if diags.HasErrors() {
 		t.Fatalf("unexpected errors: %s", diags.Err())
 	}
@@ -523,7 +529,7 @@ func TestContext2Plan_moduleDeadlock(t *testing.T) {
 			},
 		})
 
-		plan, err := ctx.Plan(m, states.NewState(), DefaultPlanOpts)
+		plan, err := ctx.Plan(context.Background(), m, states.NewState(), DefaultPlanOpts)
 		if err != nil {
 			t.Fatalf("err: %s", err)
 		}
@@ -567,7 +573,7 @@ func TestContext2Plan_moduleInput(t *testing.T) {
 		},
 	})
 
-	plan, diags := ctx.Plan(m, states.NewState(), DefaultPlanOpts)
+	plan, diags := ctx.Plan(context.Background(), m, states.NewState(), DefaultPlanOpts)
 	if diags.HasErrors() {
 		t.Fatalf("unexpected errors: %s", diags.Err())
 	}
@@ -621,7 +627,7 @@ func TestContext2Plan_moduleInputComputed(t *testing.T) {
 		},
 	})
 
-	plan, diags := ctx.Plan(m, states.NewState(), DefaultPlanOpts)
+	plan, diags := ctx.Plan(context.Background(), m, states.NewState(), DefaultPlanOpts)
 	if diags.HasErrors() {
 		t.Fatalf("unexpected errors: %s", diags.Err())
 	}
@@ -672,7 +678,7 @@ func TestContext2Plan_moduleInputFromVar(t *testing.T) {
 		},
 	})
 
-	plan, diags := ctx.Plan(m, states.NewState(), &PlanOpts{
+	plan, diags := ctx.Plan(context.Background(), m, states.NewState(), &PlanOpts{
 		Mode: plans.NormalMode,
 		SetVariables: InputValues{
 			"foo": &InputValue{
@@ -741,7 +747,7 @@ func TestContext2Plan_moduleMultiVar(t *testing.T) {
 		},
 	})
 
-	plan, diags := ctx.Plan(m, states.NewState(), DefaultPlanOpts)
+	plan, diags := ctx.Plan(context.Background(), m, states.NewState(), DefaultPlanOpts)
 	if diags.HasErrors() {
 		t.Fatalf("unexpected errors: %s", diags.Err())
 	}
@@ -806,7 +812,8 @@ func TestContext2Plan_moduleOrphans(t *testing.T) {
 			Status:    states.ObjectReady,
 			AttrsJSON: []byte(`{"id":"baz"}`),
 		},
-		mustProviderConfig(`provider["registry.terraform.io/hashicorp/aws"]`),
+		mustProviderConfig(`provider["registry.opentofu.org/hashicorp/aws"]`),
+		addrs.NoKey,
 	)
 
 	ctx := testContext2(t, &ContextOpts{
@@ -815,7 +822,7 @@ func TestContext2Plan_moduleOrphans(t *testing.T) {
 		},
 	})
 
-	plan, diags := ctx.Plan(m, state, DefaultPlanOpts)
+	plan, diags := ctx.Plan(context.Background(), m, state, DefaultPlanOpts)
 	if diags.HasErrors() {
 		t.Fatalf("unexpected errors: %s", diags.Err())
 	}
@@ -856,7 +863,7 @@ func TestContext2Plan_moduleOrphans(t *testing.T) {
 module.child:
   aws_instance.foo:
     ID = baz
-    provider = provider["registry.terraform.io/hashicorp/aws"]`
+    provider = provider["registry.opentofu.org/hashicorp/aws"]`
 
 	if plan.PriorState.String() != expectedState {
 		t.Fatalf("\nexpected state: %q\n\ngot: %q", expectedState, plan.PriorState.String())
@@ -878,7 +885,8 @@ func TestContext2Plan_moduleOrphansWithProvisioner(t *testing.T) {
 			Status:    states.ObjectReady,
 			AttrsJSON: []byte(`{"id":"top","type":"aws_instance"}`),
 		},
-		mustProviderConfig(`provider["registry.terraform.io/hashicorp/aws"]`),
+		mustProviderConfig(`provider["registry.opentofu.org/hashicorp/aws"]`),
+		addrs.NoKey,
 	)
 	child1 := state.EnsureModule(addrs.RootModuleInstance.Child("parent", addrs.NoKey).Child("child1", addrs.NoKey))
 	child1.SetResourceInstanceCurrent(
@@ -887,7 +895,8 @@ func TestContext2Plan_moduleOrphansWithProvisioner(t *testing.T) {
 			Status:    states.ObjectReady,
 			AttrsJSON: []byte(`{"id":"baz","type":"aws_instance"}`),
 		},
-		mustProviderConfig(`provider["registry.terraform.io/hashicorp/aws"]`),
+		mustProviderConfig(`provider["registry.opentofu.org/hashicorp/aws"]`),
+		addrs.NoKey,
 	)
 	child2 := state.EnsureModule(addrs.RootModuleInstance.Child("parent", addrs.NoKey).Child("child2", addrs.NoKey))
 	child2.SetResourceInstanceCurrent(
@@ -896,7 +905,8 @@ func TestContext2Plan_moduleOrphansWithProvisioner(t *testing.T) {
 			Status:    states.ObjectReady,
 			AttrsJSON: []byte(`{"id":"baz","type":"aws_instance"}`),
 		},
-		mustProviderConfig(`provider["registry.terraform.io/hashicorp/aws"]`),
+		mustProviderConfig(`provider["registry.opentofu.org/hashicorp/aws"]`),
+		addrs.NoKey,
 	)
 
 	ctx := testContext2(t, &ContextOpts{
@@ -908,7 +918,7 @@ func TestContext2Plan_moduleOrphansWithProvisioner(t *testing.T) {
 		},
 	})
 
-	plan, diags := ctx.Plan(m, state, DefaultPlanOpts)
+	plan, diags := ctx.Plan(context.Background(), m, state, DefaultPlanOpts)
 	if diags.HasErrors() {
 		t.Fatalf("unexpected errors: %s", diags.Err())
 	}
@@ -947,18 +957,18 @@ func TestContext2Plan_moduleOrphansWithProvisioner(t *testing.T) {
 
 	expectedState := `aws_instance.top:
   ID = top
-  provider = provider["registry.terraform.io/hashicorp/aws"]
+  provider = provider["registry.opentofu.org/hashicorp/aws"]
   type = aws_instance
 
 module.parent.child1:
   aws_instance.foo:
     ID = baz
-    provider = provider["registry.terraform.io/hashicorp/aws"]
+    provider = provider["registry.opentofu.org/hashicorp/aws"]
     type = aws_instance
 module.parent.child2:
   aws_instance.foo:
     ID = baz
-    provider = provider["registry.terraform.io/hashicorp/aws"]
+    provider = provider["registry.opentofu.org/hashicorp/aws"]
     type = aws_instance`
 
 	if expectedState != plan.PriorState.String() {
@@ -1013,7 +1023,7 @@ func TestContext2Plan_moduleProviderInherit(t *testing.T) {
 		},
 	})
 
-	_, err := ctx.Plan(m, states.NewState(), DefaultPlanOpts)
+	_, err := ctx.Plan(context.Background(), m, states.NewState(), DefaultPlanOpts)
 	if err != nil {
 		t.Fatalf("err: %s", err)
 	}
@@ -1077,7 +1087,7 @@ func TestContext2Plan_moduleProviderInheritDeep(t *testing.T) {
 		},
 	})
 
-	_, err := ctx.Plan(m, states.NewState(), DefaultPlanOpts)
+	_, err := ctx.Plan(context.Background(), m, states.NewState(), DefaultPlanOpts)
 	if err != nil {
 		t.Fatalf("err: %s", err)
 	}
@@ -1132,7 +1142,7 @@ func TestContext2Plan_moduleProviderDefaultsVar(t *testing.T) {
 		},
 	})
 
-	_, err := ctx.Plan(m, states.NewState(), &PlanOpts{
+	_, err := ctx.Plan(context.Background(), m, states.NewState(), &PlanOpts{
 		Mode: plans.NormalMode,
 		SetVariables: InputValues{
 			"foo": &InputValue{
@@ -1179,7 +1189,7 @@ func TestContext2Plan_moduleProviderVar(t *testing.T) {
 		},
 	})
 
-	plan, diags := ctx.Plan(m, states.NewState(), SimplePlanOpts(plans.NormalMode, testInputValuesUnset(m.Module.Variables)))
+	plan, diags := ctx.Plan(context.Background(), m, states.NewState(), SimplePlanOpts(plans.NormalMode, testInputValuesUnset(m.Module.Variables)))
 	if diags.HasErrors() {
 		t.Fatalf("unexpected errors: %s", diags.Err())
 	}
@@ -1221,7 +1231,7 @@ func TestContext2Plan_moduleVar(t *testing.T) {
 		},
 	})
 
-	plan, diags := ctx.Plan(m, states.NewState(), DefaultPlanOpts)
+	plan, diags := ctx.Plan(context.Background(), m, states.NewState(), DefaultPlanOpts)
 	if diags.HasErrors() {
 		t.Fatalf("unexpected errors: %s", diags.Err())
 	}
@@ -1274,7 +1284,7 @@ func TestContext2Plan_moduleVarWrongTypeBasic(t *testing.T) {
 		},
 	})
 
-	_, diags := ctx.Plan(m, states.NewState(), DefaultPlanOpts)
+	_, diags := ctx.Plan(context.Background(), m, states.NewState(), DefaultPlanOpts)
 	if !diags.HasErrors() {
 		t.Fatalf("succeeded; want errors")
 	}
@@ -1289,7 +1299,7 @@ func TestContext2Plan_moduleVarWrongTypeNested(t *testing.T) {
 		},
 	})
 
-	_, diags := ctx.Plan(m, states.NewState(), DefaultPlanOpts)
+	_, diags := ctx.Plan(context.Background(), m, states.NewState(), DefaultPlanOpts)
 	if !diags.HasErrors() {
 		t.Fatalf("succeeded; want errors")
 	}
@@ -1304,7 +1314,7 @@ func TestContext2Plan_moduleVarWithDefaultValue(t *testing.T) {
 		},
 	})
 
-	_, diags := ctx.Plan(m, states.NewState(), DefaultPlanOpts)
+	_, diags := ctx.Plan(context.Background(), m, states.NewState(), DefaultPlanOpts)
 	if diags.HasErrors() {
 		t.Fatalf("unexpected errors: %s", diags.Err())
 	}
@@ -1320,7 +1330,7 @@ func TestContext2Plan_moduleVarComputed(t *testing.T) {
 		},
 	})
 
-	plan, diags := ctx.Plan(m, states.NewState(), DefaultPlanOpts)
+	plan, diags := ctx.Plan(context.Background(), m, states.NewState(), DefaultPlanOpts)
 	if diags.HasErrors() {
 		t.Fatalf("unexpected errors: %s", diags.Err())
 	}
@@ -1372,7 +1382,8 @@ func TestContext2Plan_preventDestroy_bad(t *testing.T) {
 			Status:    states.ObjectReady,
 			AttrsJSON: []byte(`{"id":"i-abc123"}`),
 		},
-		mustProviderConfig(`provider["registry.terraform.io/hashicorp/aws"]`),
+		mustProviderConfig(`provider["registry.opentofu.org/hashicorp/aws"]`),
+		addrs.NoKey,
 	)
 
 	ctx := testContext2(t, &ContextOpts{
@@ -1381,7 +1392,7 @@ func TestContext2Plan_preventDestroy_bad(t *testing.T) {
 		},
 	})
 
-	plan, err := ctx.Plan(m, state, DefaultPlanOpts)
+	plan, err := ctx.Plan(context.Background(), m, state, DefaultPlanOpts)
 
 	expectedErr := "aws_instance.foo has lifecycle.prevent_destroy"
 	if !strings.Contains(fmt.Sprintf("%s", err), expectedErr) {
@@ -1389,6 +1400,12 @@ func TestContext2Plan_preventDestroy_bad(t *testing.T) {
 			t.Logf(legacyDiffComparisonString(plan.Changes))
 		}
 		t.Fatalf("expected err would contain %q\nerr: %s", expectedErr, err)
+	}
+
+	// Plan should show the expected changes, even though prevent_destroy validation fails
+	// So we could see why the resource was attempted to be destroyed
+	if got, want := 1, len(plan.Changes.Resources); got != want {
+		t.Fatalf("wrong number of planned resource changes %d; want %d\n%s", got, want, spew.Sdump(plan.Changes.Resources))
 	}
 }
 
@@ -1405,7 +1422,8 @@ func TestContext2Plan_preventDestroy_good(t *testing.T) {
 			Status:    states.ObjectReady,
 			AttrsJSON: []byte(`{"id":"i-abc123","type":"aws_instance"}`),
 		},
-		mustProviderConfig(`provider["registry.terraform.io/hashicorp/aws"]`),
+		mustProviderConfig(`provider["registry.opentofu.org/hashicorp/aws"]`),
+		addrs.NoKey,
 	)
 
 	ctx := testContext2(t, &ContextOpts{
@@ -1414,7 +1432,7 @@ func TestContext2Plan_preventDestroy_good(t *testing.T) {
 		},
 	})
 
-	plan, diags := ctx.Plan(m, state, DefaultPlanOpts)
+	plan, diags := ctx.Plan(context.Background(), m, state, DefaultPlanOpts)
 	if diags.HasErrors() {
 		t.Fatalf("unexpected errors: %s", diags.Err())
 	}
@@ -1436,7 +1454,8 @@ func TestContext2Plan_preventDestroy_countBad(t *testing.T) {
 			Status:    states.ObjectReady,
 			AttrsJSON: []byte(`{"id":"i-abc123"}`),
 		},
-		mustProviderConfig(`provider["registry.terraform.io/hashicorp/aws"]`),
+		mustProviderConfig(`provider["registry.opentofu.org/hashicorp/aws"]`),
+		addrs.NoKey,
 	)
 	root.SetResourceInstanceCurrent(
 		mustResourceInstanceAddr("aws_instance.foo[1]").Resource,
@@ -1444,7 +1463,8 @@ func TestContext2Plan_preventDestroy_countBad(t *testing.T) {
 			Status:    states.ObjectReady,
 			AttrsJSON: []byte(`{"id":"i-abc345"}`),
 		},
-		mustProviderConfig(`provider["registry.terraform.io/hashicorp/aws"]`),
+		mustProviderConfig(`provider["registry.opentofu.org/hashicorp/aws"]`),
+		addrs.NoKey,
 	)
 
 	ctx := testContext2(t, &ContextOpts{
@@ -1453,7 +1473,7 @@ func TestContext2Plan_preventDestroy_countBad(t *testing.T) {
 		},
 	})
 
-	plan, err := ctx.Plan(m, state, DefaultPlanOpts)
+	plan, err := ctx.Plan(context.Background(), m, state, DefaultPlanOpts)
 
 	expectedErr := "aws_instance.foo[1] has lifecycle.prevent_destroy"
 	if !strings.Contains(fmt.Sprintf("%s", err), expectedErr) {
@@ -1461,6 +1481,12 @@ func TestContext2Plan_preventDestroy_countBad(t *testing.T) {
 			t.Logf(legacyDiffComparisonString(plan.Changes))
 		}
 		t.Fatalf("expected err would contain %q\nerr: %s", expectedErr, err)
+	}
+
+	// Plan should show the expected changes, even though prevent_destroy validation fails
+	// So we could see why the resource was attempted to be destroyed
+	if got, want := 1, len(plan.Changes.Resources); got != want {
+		t.Fatalf("wrong number of planned resource changes %d; want %d\n%s", got, want, spew.Sdump(plan.Changes.Resources))
 	}
 }
 
@@ -1486,7 +1512,8 @@ func TestContext2Plan_preventDestroy_countGood(t *testing.T) {
 			Status:    states.ObjectReady,
 			AttrsJSON: []byte(`{"id":"i-abc123"}`),
 		},
-		mustProviderConfig(`provider["registry.terraform.io/hashicorp/aws"]`),
+		mustProviderConfig(`provider["registry.opentofu.org/hashicorp/aws"]`),
+		addrs.NoKey,
 	)
 	root.SetResourceInstanceCurrent(
 		mustResourceInstanceAddr("aws_instance.foo[1]").Resource,
@@ -1494,7 +1521,8 @@ func TestContext2Plan_preventDestroy_countGood(t *testing.T) {
 			Status:    states.ObjectReady,
 			AttrsJSON: []byte(`{"id":"i-abc345"}`),
 		},
-		mustProviderConfig(`provider["registry.terraform.io/hashicorp/aws"]`),
+		mustProviderConfig(`provider["registry.opentofu.org/hashicorp/aws"]`),
+		addrs.NoKey,
 	)
 
 	ctx := testContext2(t, &ContextOpts{
@@ -1503,7 +1531,7 @@ func TestContext2Plan_preventDestroy_countGood(t *testing.T) {
 		},
 	})
 
-	plan, diags := ctx.Plan(m, state, DefaultPlanOpts)
+	plan, diags := ctx.Plan(context.Background(), m, state, DefaultPlanOpts)
 	if diags.HasErrors() {
 		t.Fatalf("unexpected errors: %s", diags.Err())
 	}
@@ -1537,7 +1565,8 @@ func TestContext2Plan_preventDestroy_countGoodNoChange(t *testing.T) {
 			Status:    states.ObjectReady,
 			AttrsJSON: []byte(`{"id":"i-abc123","current":"0","type":"aws_instance"}`),
 		},
-		mustProviderConfig(`provider["registry.terraform.io/hashicorp/aws"]`),
+		mustProviderConfig(`provider["registry.opentofu.org/hashicorp/aws"]`),
+		addrs.NoKey,
 	)
 
 	ctx := testContext2(t, &ContextOpts{
@@ -1546,7 +1575,7 @@ func TestContext2Plan_preventDestroy_countGoodNoChange(t *testing.T) {
 		},
 	})
 
-	plan, diags := ctx.Plan(m, state, DefaultPlanOpts)
+	plan, diags := ctx.Plan(context.Background(), m, state, DefaultPlanOpts)
 	if diags.HasErrors() {
 		t.Fatalf("unexpected errors: %s", diags.Err())
 	}
@@ -1568,7 +1597,8 @@ func TestContext2Plan_preventDestroy_destroyPlan(t *testing.T) {
 			Status:    states.ObjectReady,
 			AttrsJSON: []byte(`{"id":"i-abc123"}`),
 		},
-		mustProviderConfig(`provider["registry.terraform.io/hashicorp/aws"]`),
+		mustProviderConfig(`provider["registry.opentofu.org/hashicorp/aws"]`),
+		addrs.NoKey,
 	)
 
 	ctx := testContext2(t, &ContextOpts{
@@ -1577,7 +1607,7 @@ func TestContext2Plan_preventDestroy_destroyPlan(t *testing.T) {
 		},
 	})
 
-	plan, diags := ctx.Plan(m, state, &PlanOpts{
+	plan, diags := ctx.Plan(context.Background(), m, state, &PlanOpts{
 		Mode: plans.DestroyMode,
 	})
 
@@ -1603,7 +1633,7 @@ func TestContext2Plan_provisionerCycle(t *testing.T) {
 		},
 	})
 
-	_, diags := ctx.Plan(m, states.NewState(), DefaultPlanOpts)
+	_, diags := ctx.Plan(context.Background(), m, states.NewState(), DefaultPlanOpts)
 	if !diags.HasErrors() {
 		t.Fatalf("succeeded; want errors")
 	}
@@ -1619,7 +1649,7 @@ func TestContext2Plan_computed(t *testing.T) {
 		},
 	})
 
-	plan, diags := ctx.Plan(m, states.NewState(), DefaultPlanOpts)
+	plan, diags := ctx.Plan(context.Background(), m, states.NewState(), DefaultPlanOpts)
 	if diags.HasErrors() {
 		t.Fatalf("unexpected errors: %s", diags.Err())
 	}
@@ -1691,7 +1721,7 @@ func TestContext2Plan_blockNestingGroup(t *testing.T) {
 		},
 	})
 
-	plan, diags := ctx.Plan(m, states.NewState(), DefaultPlanOpts)
+	plan, diags := ctx.Plan(context.Background(), m, states.NewState(), DefaultPlanOpts)
 	if diags.HasErrors() {
 		t.Fatalf("unexpected errors: %s", diags.Err())
 	}
@@ -1715,7 +1745,7 @@ func TestContext2Plan_blockNestingGroup(t *testing.T) {
 		// This represents the situation where the remote service _always_ creates
 		// a single "blah", regardless of whether the block is present, but when
 		// the block _is_ present the user can override some aspects of it. The
-		// absense of the block means "use the defaults", in that case.
+		// absence of the block means "use the defaults", in that case.
 		Config: cty.ObjectVal(map[string]cty.Value{
 			"blah": cty.ObjectVal(map[string]cty.Value{
 				"baz": cty.NullVal(cty.String),
@@ -1760,7 +1790,7 @@ func TestContext2Plan_computedDataResource(t *testing.T) {
 		},
 	})
 
-	plan, diags := ctx.Plan(m, states.NewState(), DefaultPlanOpts)
+	plan, diags := ctx.Plan(context.Background(), m, states.NewState(), DefaultPlanOpts)
 	if diags.HasErrors() {
 		t.Fatalf("unexpected errors: %s", diags.Err())
 	}
@@ -1828,10 +1858,10 @@ func TestContext2Plan_computedInFunction(t *testing.T) {
 		},
 	})
 
-	diags := ctx.Validate(m)
+	diags := ctx.Validate(context.Background(), m)
 	assertNoErrors(t, diags)
 
-	_, diags = ctx.Plan(m, states.NewState(), DefaultPlanOpts)
+	_, diags = ctx.Plan(context.Background(), m, states.NewState(), DefaultPlanOpts)
 	assertNoErrors(t, diags)
 
 	if !p.ReadDataSourceCalled {
@@ -1867,7 +1897,7 @@ func TestContext2Plan_computedDataCountResource(t *testing.T) {
 		},
 	})
 
-	plan, diags := ctx.Plan(m, states.NewState(), DefaultPlanOpts)
+	plan, diags := ctx.Plan(context.Background(), m, states.NewState(), DefaultPlanOpts)
 	if diags.HasErrors() {
 		t.Fatalf("unexpected errors: %s", diags.Err())
 	}
@@ -1895,7 +1925,7 @@ func TestContext2Plan_localValueCount(t *testing.T) {
 		},
 	})
 
-	plan, diags := ctx.Plan(m, states.NewState(), DefaultPlanOpts)
+	plan, diags := ctx.Plan(context.Background(), m, states.NewState(), DefaultPlanOpts)
 	if diags.HasErrors() {
 		t.Fatalf("unexpected errors: %s", diags.Err())
 	}
@@ -1965,7 +1995,8 @@ func TestContext2Plan_dataResourceBecomesComputed(t *testing.T) {
 			Status:    states.ObjectReady,
 			AttrsJSON: []byte(`{"id":"i-abc123","foo":"baz"}`),
 		},
-		mustProviderConfig(`provider["registry.terraform.io/hashicorp/aws"]`),
+		mustProviderConfig(`provider["registry.opentofu.org/hashicorp/aws"]`),
+		addrs.NoKey,
 	)
 
 	ctx := testContext2(t, &ContextOpts{
@@ -1974,7 +2005,7 @@ func TestContext2Plan_dataResourceBecomesComputed(t *testing.T) {
 		},
 	})
 
-	plan, diags := ctx.Plan(m, state, DefaultPlanOpts)
+	plan, diags := ctx.Plan(context.Background(), m, state, DefaultPlanOpts)
 	if diags.HasErrors() {
 		t.Fatalf("unexpected errors during plan: %s", diags.Err())
 	}
@@ -2028,7 +2059,7 @@ func TestContext2Plan_computedList(t *testing.T) {
 		},
 	})
 
-	plan, diags := ctx.Plan(m, states.NewState(), DefaultPlanOpts)
+	plan, diags := ctx.Plan(context.Background(), m, states.NewState(), DefaultPlanOpts)
 	if diags.HasErrors() {
 		t.Fatalf("unexpected errors: %s", diags.Err())
 	}
@@ -2091,7 +2122,7 @@ func TestContext2Plan_computedMultiIndex(t *testing.T) {
 		},
 	})
 
-	plan, diags := ctx.Plan(m, states.NewState(), DefaultPlanOpts)
+	plan, diags := ctx.Plan(context.Background(), m, states.NewState(), DefaultPlanOpts)
 	if diags.HasErrors() {
 		t.Fatalf("unexpected errors: %s", diags.Err())
 	}
@@ -2145,7 +2176,7 @@ func TestContext2Plan_count(t *testing.T) {
 		},
 	})
 
-	plan, diags := ctx.Plan(m, states.NewState(), DefaultPlanOpts)
+	plan, diags := ctx.Plan(context.Background(), m, states.NewState(), DefaultPlanOpts)
 	if diags.HasErrors() {
 		t.Fatalf("unexpected errors: %s", diags.Err())
 	}
@@ -2218,7 +2249,7 @@ func TestContext2Plan_countComputed(t *testing.T) {
 		},
 	})
 
-	_, err := ctx.Plan(m, states.NewState(), DefaultPlanOpts)
+	_, err := ctx.Plan(context.Background(), m, states.NewState(), DefaultPlanOpts)
 	if err == nil {
 		t.Fatal("should error")
 	}
@@ -2234,7 +2265,7 @@ func TestContext2Plan_countComputedModule(t *testing.T) {
 		},
 	})
 
-	_, err := ctx.Plan(m, states.NewState(), DefaultPlanOpts)
+	_, err := ctx.Plan(context.Background(), m, states.NewState(), DefaultPlanOpts)
 
 	expectedErr := `The "count" value depends on resource attributes`
 	if !strings.Contains(fmt.Sprintf("%s", err), expectedErr) {
@@ -2253,7 +2284,7 @@ func TestContext2Plan_countModuleStatic(t *testing.T) {
 		},
 	})
 
-	plan, diags := ctx.Plan(m, states.NewState(), SimplePlanOpts(plans.NormalMode, testInputValuesUnset(m.Module.Variables)))
+	plan, diags := ctx.Plan(context.Background(), m, states.NewState(), SimplePlanOpts(plans.NormalMode, testInputValuesUnset(m.Module.Variables)))
 	if diags.HasErrors() {
 		t.Fatalf("unexpected errors: %s", diags.Err())
 	}
@@ -2306,7 +2337,7 @@ func TestContext2Plan_countModuleStaticGrandchild(t *testing.T) {
 		},
 	})
 
-	plan, diags := ctx.Plan(m, states.NewState(), SimplePlanOpts(plans.NormalMode, testInputValuesUnset(m.Module.Variables)))
+	plan, diags := ctx.Plan(context.Background(), m, states.NewState(), SimplePlanOpts(plans.NormalMode, testInputValuesUnset(m.Module.Variables)))
 	if diags.HasErrors() {
 		t.Fatalf("unexpected errors: %s", diags.Err())
 	}
@@ -2359,7 +2390,7 @@ func TestContext2Plan_countIndex(t *testing.T) {
 		},
 	})
 
-	plan, diags := ctx.Plan(m, states.NewState(), DefaultPlanOpts)
+	plan, diags := ctx.Plan(context.Background(), m, states.NewState(), DefaultPlanOpts)
 	if diags.HasErrors() {
 		t.Fatalf("unexpected errors: %s", diags.Err())
 	}
@@ -2409,7 +2440,7 @@ func TestContext2Plan_countVar(t *testing.T) {
 		},
 	})
 
-	plan, diags := ctx.Plan(m, states.NewState(), &PlanOpts{
+	plan, diags := ctx.Plan(context.Background(), m, states.NewState(), &PlanOpts{
 		Mode: plans.NormalMode,
 		SetVariables: InputValues{
 			"instance_count": &InputValue{
@@ -2494,7 +2525,7 @@ func TestContext2Plan_countZero(t *testing.T) {
 		},
 	})
 
-	plan, diags := ctx.Plan(m, states.NewState(), DefaultPlanOpts)
+	plan, diags := ctx.Plan(context.Background(), m, states.NewState(), DefaultPlanOpts)
 	if diags.HasErrors() {
 		t.Fatalf("unexpected errors: %s", diags.Err())
 	}
@@ -2534,7 +2565,7 @@ func TestContext2Plan_countOneIndex(t *testing.T) {
 		},
 	})
 
-	plan, diags := ctx.Plan(m, states.NewState(), DefaultPlanOpts)
+	plan, diags := ctx.Plan(context.Background(), m, states.NewState(), DefaultPlanOpts)
 	if diags.HasErrors() {
 		t.Fatalf("unexpected errors: %s", diags.Err())
 	}
@@ -2587,7 +2618,8 @@ func TestContext2Plan_countDecreaseToOne(t *testing.T) {
 			Status:    states.ObjectReady,
 			AttrsJSON: []byte(`{"id":"bar","foo":"foo","type":"aws_instance"}`),
 		},
-		mustProviderConfig(`provider["registry.terraform.io/hashicorp/aws"]`),
+		mustProviderConfig(`provider["registry.opentofu.org/hashicorp/aws"]`),
+		addrs.NoKey,
 	)
 	root.SetResourceInstanceCurrent(
 		mustResourceInstanceAddr("aws_instance.foo[1]").Resource,
@@ -2595,7 +2627,8 @@ func TestContext2Plan_countDecreaseToOne(t *testing.T) {
 			Status:    states.ObjectReady,
 			AttrsJSON: []byte(`{"id":"bar"}`),
 		},
-		mustProviderConfig(`provider["registry.terraform.io/hashicorp/aws"]`),
+		mustProviderConfig(`provider["registry.opentofu.org/hashicorp/aws"]`),
+		addrs.NoKey,
 	)
 	root.SetResourceInstanceCurrent(
 		mustResourceInstanceAddr("aws_instance.foo[2]").Resource,
@@ -2603,7 +2636,8 @@ func TestContext2Plan_countDecreaseToOne(t *testing.T) {
 			Status:    states.ObjectReady,
 			AttrsJSON: []byte(`{"id":"bar"}`),
 		},
-		mustProviderConfig(`provider["registry.terraform.io/hashicorp/aws"]`),
+		mustProviderConfig(`provider["registry.opentofu.org/hashicorp/aws"]`),
+		addrs.NoKey,
 	)
 
 	ctx := testContext2(t, &ContextOpts{
@@ -2612,7 +2646,7 @@ func TestContext2Plan_countDecreaseToOne(t *testing.T) {
 		},
 	})
 
-	plan, diags := ctx.Plan(m, state, DefaultPlanOpts)
+	plan, diags := ctx.Plan(context.Background(), m, state, DefaultPlanOpts)
 	if diags.HasErrors() {
 		t.Fatalf("unexpected errors: %s", diags.Err())
 	}
@@ -2659,18 +2693,18 @@ func TestContext2Plan_countDecreaseToOne(t *testing.T) {
 
 	expectedState := `aws_instance.foo:
   ID = bar
-  provider = provider["registry.terraform.io/hashicorp/aws"]
+  provider = provider["registry.opentofu.org/hashicorp/aws"]
   foo = foo
   type = aws_instance
 aws_instance.foo.1:
   ID = bar
-  provider = provider["registry.terraform.io/hashicorp/aws"]
+  provider = provider["registry.opentofu.org/hashicorp/aws"]
 aws_instance.foo.2:
   ID = bar
-  provider = provider["registry.terraform.io/hashicorp/aws"]`
+  provider = provider["registry.opentofu.org/hashicorp/aws"]`
 
 	if plan.PriorState.String() != expectedState {
-		t.Fatalf("epected state:\n%q\n\ngot state:\n%q\n", expectedState, plan.PriorState.String())
+		t.Fatalf("expected state:\n%q\n\ngot state:\n%q\n", expectedState, plan.PriorState.String())
 	}
 }
 
@@ -2687,7 +2721,8 @@ func TestContext2Plan_countIncreaseFromNotSet(t *testing.T) {
 			Status:    states.ObjectReady,
 			AttrsJSON: []byte(`{"id":"bar","type":"aws_instance","foo":"foo"}`),
 		},
-		mustProviderConfig(`provider["registry.terraform.io/hashicorp/aws"]`),
+		mustProviderConfig(`provider["registry.opentofu.org/hashicorp/aws"]`),
+		addrs.NoKey,
 	)
 
 	ctx := testContext2(t, &ContextOpts{
@@ -2696,7 +2731,7 @@ func TestContext2Plan_countIncreaseFromNotSet(t *testing.T) {
 		},
 	})
 
-	plan, diags := ctx.Plan(m, state, DefaultPlanOpts)
+	plan, diags := ctx.Plan(context.Background(), m, state, DefaultPlanOpts)
 	if diags.HasErrors() {
 		t.Fatalf("unexpected errors: %s", diags.Err())
 	}
@@ -2764,7 +2799,8 @@ func TestContext2Plan_countIncreaseFromOne(t *testing.T) {
 			Status:    states.ObjectReady,
 			AttrsJSON: []byte(`{"id":"bar","foo":"foo","type":"aws_instance"}`),
 		},
-		mustProviderConfig(`provider["registry.terraform.io/hashicorp/aws"]`),
+		mustProviderConfig(`provider["registry.opentofu.org/hashicorp/aws"]`),
+		addrs.NoKey,
 	)
 
 	ctx := testContext2(t, &ContextOpts{
@@ -2773,7 +2809,7 @@ func TestContext2Plan_countIncreaseFromOne(t *testing.T) {
 		},
 	})
 
-	plan, diags := ctx.Plan(m, state, DefaultPlanOpts)
+	plan, diags := ctx.Plan(context.Background(), m, state, DefaultPlanOpts)
 	if diags.HasErrors() {
 		t.Fatalf("unexpected errors: %s", diags.Err())
 	}
@@ -2847,7 +2883,8 @@ func TestContext2Plan_countIncreaseFromOneCorrupted(t *testing.T) {
 			Status:    states.ObjectReady,
 			AttrsJSON: []byte(`{"id":"bar","foo":"foo","type":"aws_instance"}`),
 		},
-		mustProviderConfig(`provider["registry.terraform.io/hashicorp/aws"]`),
+		mustProviderConfig(`provider["registry.opentofu.org/hashicorp/aws"]`),
+		addrs.NoKey,
 	)
 	root.SetResourceInstanceCurrent(
 		mustResourceInstanceAddr("aws_instance.foo[0]").Resource,
@@ -2855,7 +2892,8 @@ func TestContext2Plan_countIncreaseFromOneCorrupted(t *testing.T) {
 			Status:    states.ObjectReady,
 			AttrsJSON: []byte(`{"id":"bar","foo":"foo","type":"aws_instance"}`),
 		},
-		mustProviderConfig(`provider["registry.terraform.io/hashicorp/aws"]`),
+		mustProviderConfig(`provider["registry.opentofu.org/hashicorp/aws"]`),
+		addrs.NoKey,
 	)
 
 	ctx := testContext2(t, &ContextOpts{
@@ -2864,7 +2902,7 @@ func TestContext2Plan_countIncreaseFromOneCorrupted(t *testing.T) {
 		},
 	})
 
-	plan, diags := ctx.Plan(m, state, DefaultPlanOpts)
+	plan, diags := ctx.Plan(context.Background(), m, state, DefaultPlanOpts)
 	if diags.HasErrors() {
 		t.Fatalf("unexpected errors: %s", diags.Err())
 	}
@@ -2955,7 +2993,8 @@ func TestContext2Plan_countIncreaseWithSplatReference(t *testing.T) {
 			Status:    states.ObjectReady,
 			AttrsJSON: []byte(`{"id":"bar","name":"foo 0"}`),
 		},
-		mustProviderConfig(`provider["registry.terraform.io/hashicorp/aws"]`),
+		mustProviderConfig(`provider["registry.opentofu.org/hashicorp/aws"]`),
+		addrs.NoKey,
 	)
 	root.SetResourceInstanceCurrent(
 		mustResourceInstanceAddr("aws_instance.foo[1]").Resource,
@@ -2963,7 +3002,8 @@ func TestContext2Plan_countIncreaseWithSplatReference(t *testing.T) {
 			Status:    states.ObjectReady,
 			AttrsJSON: []byte(`{"id":"bar","name":"foo 1"}`),
 		},
-		mustProviderConfig(`provider["registry.terraform.io/hashicorp/aws"]`),
+		mustProviderConfig(`provider["registry.opentofu.org/hashicorp/aws"]`),
+		addrs.NoKey,
 	)
 	root.SetResourceInstanceCurrent(
 		mustResourceInstanceAddr("aws_instance.bar[0]").Resource,
@@ -2971,7 +3011,8 @@ func TestContext2Plan_countIncreaseWithSplatReference(t *testing.T) {
 			Status:    states.ObjectReady,
 			AttrsJSON: []byte(`{"id":"bar","foo_name":"foo 0"}`),
 		},
-		mustProviderConfig(`provider["registry.terraform.io/hashicorp/aws"]`),
+		mustProviderConfig(`provider["registry.opentofu.org/hashicorp/aws"]`),
+		addrs.NoKey,
 	)
 	root.SetResourceInstanceCurrent(
 		mustResourceInstanceAddr("aws_instance.bar[1]").Resource,
@@ -2979,7 +3020,8 @@ func TestContext2Plan_countIncreaseWithSplatReference(t *testing.T) {
 			Status:    states.ObjectReady,
 			AttrsJSON: []byte(`{"id":"bar","foo_name":"foo 1"}`),
 		},
-		mustProviderConfig(`provider["registry.terraform.io/hashicorp/aws"]`),
+		mustProviderConfig(`provider["registry.opentofu.org/hashicorp/aws"]`),
+		addrs.NoKey,
 	)
 
 	ctx := testContext2(t, &ContextOpts{
@@ -2988,7 +3030,7 @@ func TestContext2Plan_countIncreaseWithSplatReference(t *testing.T) {
 		},
 	})
 
-	plan, diags := ctx.Plan(m, state, DefaultPlanOpts)
+	plan, diags := ctx.Plan(context.Background(), m, state, DefaultPlanOpts)
 	if diags.HasErrors() {
 		t.Fatalf("unexpected errors: %s", diags.Err())
 	}
@@ -3042,7 +3084,7 @@ func TestContext2Plan_forEach(t *testing.T) {
 		},
 	})
 
-	plan, diags := ctx.Plan(m, states.NewState(), DefaultPlanOpts)
+	plan, diags := ctx.Plan(context.Background(), m, states.NewState(), DefaultPlanOpts)
 	if diags.HasErrors() {
 		t.Fatalf("unexpected errors: %s", diags.Err())
 	}
@@ -3076,7 +3118,7 @@ func TestContext2Plan_forEachUnknownValue(t *testing.T) {
 		},
 	})
 
-	_, diags := ctx.Plan(m, states.NewState(), &PlanOpts{
+	_, diags := ctx.Plan(context.Background(), m, states.NewState(), &PlanOpts{
 		Mode: plans.NormalMode,
 		SetVariables: InputValues{
 			"foo": {
@@ -3119,7 +3161,8 @@ func TestContext2Plan_destroy(t *testing.T) {
 			Status:    states.ObjectReady,
 			AttrsJSON: []byte(`{"id":"bar"}`),
 		},
-		mustProviderConfig(`provider["registry.terraform.io/hashicorp/aws"]`),
+		mustProviderConfig(`provider["registry.opentofu.org/hashicorp/aws"]`),
+		addrs.NoKey,
 	)
 	root.SetResourceInstanceCurrent(
 		mustResourceInstanceAddr("aws_instance.two").Resource,
@@ -3127,7 +3170,8 @@ func TestContext2Plan_destroy(t *testing.T) {
 			Status:    states.ObjectReady,
 			AttrsJSON: []byte(`{"id":"baz"}`),
 		},
-		mustProviderConfig(`provider["registry.terraform.io/hashicorp/aws"]`),
+		mustProviderConfig(`provider["registry.opentofu.org/hashicorp/aws"]`),
+		addrs.NoKey,
 	)
 
 	ctx := testContext2(t, &ContextOpts{
@@ -3136,7 +3180,7 @@ func TestContext2Plan_destroy(t *testing.T) {
 		},
 	})
 
-	plan, diags := ctx.Plan(m, state, &PlanOpts{
+	plan, diags := ctx.Plan(context.Background(), m, state, &PlanOpts{
 		Mode: plans.DestroyMode,
 	})
 	if diags.HasErrors() {
@@ -3180,7 +3224,8 @@ func TestContext2Plan_moduleDestroy(t *testing.T) {
 			Status:    states.ObjectReady,
 			AttrsJSON: []byte(`{"id":"bar"}`),
 		},
-		mustProviderConfig(`provider["registry.terraform.io/hashicorp/aws"]`),
+		mustProviderConfig(`provider["registry.opentofu.org/hashicorp/aws"]`),
+		addrs.NoKey,
 	)
 	child := state.EnsureModule(addrs.RootModuleInstance.Child("child", addrs.NoKey))
 	child.SetResourceInstanceCurrent(
@@ -3189,7 +3234,8 @@ func TestContext2Plan_moduleDestroy(t *testing.T) {
 			Status:    states.ObjectReady,
 			AttrsJSON: []byte(`{"id":"bar"}`),
 		},
-		mustProviderConfig(`provider["registry.terraform.io/hashicorp/aws"]`),
+		mustProviderConfig(`provider["registry.opentofu.org/hashicorp/aws"]`),
+		addrs.NoKey,
 	)
 
 	ctx := testContext2(t, &ContextOpts{
@@ -3198,7 +3244,7 @@ func TestContext2Plan_moduleDestroy(t *testing.T) {
 		},
 	})
 
-	plan, diags := ctx.Plan(m, state, &PlanOpts{
+	plan, diags := ctx.Plan(context.Background(), m, state, &PlanOpts{
 		Mode: plans.DestroyMode,
 	})
 	if diags.HasErrors() {
@@ -3242,7 +3288,8 @@ func TestContext2Plan_moduleDestroyCycle(t *testing.T) {
 			Status:    states.ObjectReady,
 			AttrsJSON: []byte(`{"id":"a"}`),
 		},
-		mustProviderConfig(`provider["registry.terraform.io/hashicorp/aws"]`),
+		mustProviderConfig(`provider["registry.opentofu.org/hashicorp/aws"]`),
+		addrs.NoKey,
 	)
 	bModule := state.EnsureModule(addrs.RootModuleInstance.Child("b_module", addrs.NoKey))
 	bModule.SetResourceInstanceCurrent(
@@ -3251,7 +3298,8 @@ func TestContext2Plan_moduleDestroyCycle(t *testing.T) {
 			Status:    states.ObjectReady,
 			AttrsJSON: []byte(`{"id":"b"}`),
 		},
-		mustProviderConfig(`provider["registry.terraform.io/hashicorp/aws"]`),
+		mustProviderConfig(`provider["registry.opentofu.org/hashicorp/aws"]`),
+		addrs.NoKey,
 	)
 
 	ctx := testContext2(t, &ContextOpts{
@@ -3260,7 +3308,7 @@ func TestContext2Plan_moduleDestroyCycle(t *testing.T) {
 		},
 	})
 
-	plan, diags := ctx.Plan(m, state, &PlanOpts{
+	plan, diags := ctx.Plan(context.Background(), m, state, &PlanOpts{
 		Mode: plans.DestroyMode,
 	})
 	if diags.HasErrors() {
@@ -3304,7 +3352,8 @@ func TestContext2Plan_moduleDestroyMultivar(t *testing.T) {
 			Status:    states.ObjectReady,
 			AttrsJSON: []byte(`{"id":"bar0"}`),
 		},
-		mustProviderConfig(`provider["registry.terraform.io/hashicorp/aws"]`),
+		mustProviderConfig(`provider["registry.opentofu.org/hashicorp/aws"]`),
+		addrs.NoKey,
 	)
 	child.SetResourceInstanceCurrent(
 		mustResourceInstanceAddr("aws_instance.foo[1]").Resource,
@@ -3312,7 +3361,8 @@ func TestContext2Plan_moduleDestroyMultivar(t *testing.T) {
 			Status:    states.ObjectReady,
 			AttrsJSON: []byte(`{"id":"bar1"}`),
 		},
-		mustProviderConfig(`provider["registry.terraform.io/hashicorp/aws"]`),
+		mustProviderConfig(`provider["registry.opentofu.org/hashicorp/aws"]`),
+		addrs.NoKey,
 	)
 
 	ctx := testContext2(t, &ContextOpts{
@@ -3321,7 +3371,7 @@ func TestContext2Plan_moduleDestroyMultivar(t *testing.T) {
 		},
 	})
 
-	plan, diags := ctx.Plan(m, state, &PlanOpts{
+	plan, diags := ctx.Plan(context.Background(), m, state, &PlanOpts{
 		Mode: plans.DestroyMode,
 	})
 	if diags.HasErrors() {
@@ -3379,7 +3429,7 @@ func TestContext2Plan_pathVar(t *testing.T) {
 		},
 	})
 
-	plan, diags := ctx.Plan(m, states.NewState(), DefaultPlanOpts)
+	plan, diags := ctx.Plan(context.Background(), m, states.NewState(), DefaultPlanOpts)
 	if diags.HasErrors() {
 		t.Fatalf("err: %s", diags.Err())
 	}
@@ -3403,9 +3453,9 @@ func TestContext2Plan_pathVar(t *testing.T) {
 				t.Fatalf("resource %s should be created", i)
 			}
 			checkVals(t, objectVal(t, schema, map[string]cty.Value{
-				"cwd":    cty.StringVal(cwd + "/barpath"),
-				"module": cty.StringVal(m.Module.SourceDir + "/foopath"),
-				"root":   cty.StringVal(m.Module.SourceDir + "/barpath"),
+				"cwd":    cty.StringVal(filepath.ToSlash(cwd + "/barpath")),
+				"module": cty.StringVal(filepath.ToSlash(m.Module.SourceDir + "/foopath")),
+				"root":   cty.StringVal(filepath.ToSlash(m.Module.SourceDir + "/barpath")),
 			}), ric.After)
 		default:
 			t.Fatal("unknown instance:", i)
@@ -3425,7 +3475,8 @@ func TestContext2Plan_diffVar(t *testing.T) {
 			Status:    states.ObjectReady,
 			AttrsJSON: []byte(`{"id":"bar","num":"2","type":"aws_instance"}`),
 		},
-		mustProviderConfig(`provider["registry.terraform.io/hashicorp/aws"]`),
+		mustProviderConfig(`provider["registry.opentofu.org/hashicorp/aws"]`),
+		addrs.NoKey,
 	)
 
 	ctx := testContext2(t, &ContextOpts{
@@ -3434,7 +3485,7 @@ func TestContext2Plan_diffVar(t *testing.T) {
 		},
 	})
 
-	plan, diags := ctx.Plan(m, state, DefaultPlanOpts)
+	plan, diags := ctx.Plan(context.Background(), m, state, DefaultPlanOpts)
 	if diags.HasErrors() {
 		t.Fatalf("unexpected errors: %s", diags.Err())
 	}
@@ -3493,7 +3544,7 @@ func TestContext2Plan_hook(t *testing.T) {
 		},
 	})
 
-	_, diags := ctx.Plan(m, states.NewState(), DefaultPlanOpts)
+	_, diags := ctx.Plan(context.Background(), m, states.NewState(), DefaultPlanOpts)
 	if diags.HasErrors() {
 		t.Fatalf("unexpected errors: %s", diags.Err())
 	}
@@ -3508,7 +3559,7 @@ func TestContext2Plan_hook(t *testing.T) {
 
 func TestContext2Plan_closeProvider(t *testing.T) {
 	// this fixture only has an aliased provider located in the module, to make
-	// sure that the provier name contains a path more complex than
+	// sure that the provider name contains a path more complex than
 	// "provider.aws".
 	m := testModule(t, "plan-close-module-provider")
 	p := testProvider("aws")
@@ -3518,7 +3569,7 @@ func TestContext2Plan_closeProvider(t *testing.T) {
 		},
 	})
 
-	_, diags := ctx.Plan(m, states.NewState(), DefaultPlanOpts)
+	_, diags := ctx.Plan(context.Background(), m, states.NewState(), DefaultPlanOpts)
 	if diags.HasErrors() {
 		t.Fatalf("unexpected errors: %s", diags.Err())
 	}
@@ -3540,7 +3591,8 @@ func TestContext2Plan_orphan(t *testing.T) {
 			Status:    states.ObjectReady,
 			AttrsJSON: []byte(`{"id":"bar"}`),
 		},
-		mustProviderConfig(`provider["registry.terraform.io/hashicorp/aws"]`),
+		mustProviderConfig(`provider["registry.opentofu.org/hashicorp/aws"]`),
+		addrs.NoKey,
 	)
 
 	ctx := testContext2(t, &ContextOpts{
@@ -3549,7 +3601,7 @@ func TestContext2Plan_orphan(t *testing.T) {
 		},
 	})
 
-	plan, diags := ctx.Plan(m, state, DefaultPlanOpts)
+	plan, diags := ctx.Plan(context.Background(), m, state, DefaultPlanOpts)
 	if diags.HasErrors() {
 		t.Fatalf("unexpected errors: %s", diags.Err())
 	}
@@ -3604,7 +3656,7 @@ func TestContext2Plan_shadowUuid(t *testing.T) {
 		},
 	})
 
-	_, diags := ctx.Plan(m, states.NewState(), DefaultPlanOpts)
+	_, diags := ctx.Plan(context.Background(), m, states.NewState(), DefaultPlanOpts)
 	if diags.HasErrors() {
 		t.Fatalf("unexpected errors: %s", diags.Err())
 	}
@@ -3622,7 +3674,8 @@ func TestContext2Plan_state(t *testing.T) {
 			Status:    states.ObjectReady,
 			AttrsJSON: []byte(`{"id":"bar"}`),
 		},
-		mustProviderConfig(`provider["registry.terraform.io/hashicorp/aws"]`),
+		mustProviderConfig(`provider["registry.opentofu.org/hashicorp/aws"]`),
+		addrs.NoKey,
 	)
 	ctx := testContext2(t, &ContextOpts{
 		Providers: map[addrs.Provider]providers.Factory{
@@ -3630,7 +3683,7 @@ func TestContext2Plan_state(t *testing.T) {
 		},
 	})
 
-	plan, diags := ctx.Plan(m, state, DefaultPlanOpts)
+	plan, diags := ctx.Plan(context.Background(), m, state, DefaultPlanOpts)
 	if diags.HasErrors() {
 		t.Fatalf("unexpected errors: %s", diags.Err())
 	}
@@ -3724,7 +3777,8 @@ func TestContext2Plan_requiresReplace(t *testing.T) {
 			Status:    states.ObjectReady,
 			AttrsJSON: []byte(`{"v":"hello"}`),
 		},
-		mustProviderConfig(`provider["registry.terraform.io/hashicorp/test"]`),
+		mustProviderConfig(`provider["registry.opentofu.org/hashicorp/test"]`),
+		addrs.NoKey,
 	)
 
 	ctx := testContext2(t, &ContextOpts{
@@ -3733,7 +3787,7 @@ func TestContext2Plan_requiresReplace(t *testing.T) {
 		},
 	})
 
-	plan, diags := ctx.Plan(m, state, DefaultPlanOpts)
+	plan, diags := ctx.Plan(context.Background(), m, state, DefaultPlanOpts)
 	if diags.HasErrors() {
 		t.Fatalf("unexpected errors: %s", diags.Err())
 	}
@@ -3782,7 +3836,8 @@ func TestContext2Plan_taint(t *testing.T) {
 			Status:    states.ObjectReady,
 			AttrsJSON: []byte(`{"id":"bar","num":"2","type":"aws_instance"}`),
 		},
-		mustProviderConfig(`provider["registry.terraform.io/hashicorp/aws"]`),
+		mustProviderConfig(`provider["registry.opentofu.org/hashicorp/aws"]`),
+		addrs.NoKey,
 	)
 	root.SetResourceInstanceCurrent(
 		mustResourceInstanceAddr("aws_instance.bar").Resource,
@@ -3790,7 +3845,8 @@ func TestContext2Plan_taint(t *testing.T) {
 			Status:    states.ObjectTainted,
 			AttrsJSON: []byte(`{"id":"baz"}`),
 		},
-		mustProviderConfig(`provider["registry.terraform.io/hashicorp/aws"]`),
+		mustProviderConfig(`provider["registry.opentofu.org/hashicorp/aws"]`),
+		addrs.NoKey,
 	)
 
 	ctx := testContext2(t, &ContextOpts{
@@ -3799,7 +3855,7 @@ func TestContext2Plan_taint(t *testing.T) {
 		},
 	})
 
-	plan, diags := ctx.Plan(m, state, DefaultPlanOpts)
+	plan, diags := ctx.Plan(context.Background(), m, state, DefaultPlanOpts)
 	if diags.HasErrors() {
 		t.Fatalf("unexpected errors: %s", diags.Err())
 	}
@@ -3868,7 +3924,8 @@ func TestContext2Plan_taintIgnoreChanges(t *testing.T) {
 			Status:    states.ObjectTainted,
 			AttrsJSON: []byte(`{"id":"foo","vars":"foo","type":"aws_instance"}`),
 		},
-		mustProviderConfig(`provider["registry.terraform.io/hashicorp/aws"]`),
+		mustProviderConfig(`provider["registry.opentofu.org/hashicorp/aws"]`),
+		addrs.NoKey,
 	)
 
 	ctx := testContext2(t, &ContextOpts{
@@ -3877,7 +3934,7 @@ func TestContext2Plan_taintIgnoreChanges(t *testing.T) {
 		},
 	})
 
-	plan, diags := ctx.Plan(m, state, DefaultPlanOpts)
+	plan, diags := ctx.Plan(context.Background(), m, state, DefaultPlanOpts)
 	if diags.HasErrors() {
 		t.Fatalf("unexpected errors: %s", diags.Err())
 	}
@@ -3932,7 +3989,8 @@ func TestContext2Plan_taintDestroyInterpolatedCountRace(t *testing.T) {
 			Status:    states.ObjectTainted,
 			AttrsJSON: []byte(`{"id":"bar","type":"aws_instance"}`),
 		},
-		mustProviderConfig(`provider["registry.terraform.io/hashicorp/aws"]`),
+		mustProviderConfig(`provider["registry.opentofu.org/hashicorp/aws"]`),
+		addrs.NoKey,
 	)
 	root.SetResourceInstanceCurrent(
 		mustResourceInstanceAddr("aws_instance.foo[1]").Resource,
@@ -3940,7 +3998,8 @@ func TestContext2Plan_taintDestroyInterpolatedCountRace(t *testing.T) {
 			Status:    states.ObjectReady,
 			AttrsJSON: []byte(`{"id":"bar","type":"aws_instance"}`),
 		},
-		mustProviderConfig(`provider["registry.terraform.io/hashicorp/aws"]`),
+		mustProviderConfig(`provider["registry.opentofu.org/hashicorp/aws"]`),
+		addrs.NoKey,
 	)
 	root.SetResourceInstanceCurrent(
 		mustResourceInstanceAddr("aws_instance.foo[2]").Resource,
@@ -3948,7 +4007,8 @@ func TestContext2Plan_taintDestroyInterpolatedCountRace(t *testing.T) {
 			Status:    states.ObjectReady,
 			AttrsJSON: []byte(`{"id":"bar","type":"aws_instance"}`),
 		},
-		mustProviderConfig(`provider["registry.terraform.io/hashicorp/aws"]`),
+		mustProviderConfig(`provider["registry.opentofu.org/hashicorp/aws"]`),
+		addrs.NoKey,
 	)
 
 	for i := 0; i < 100; i++ {
@@ -3958,7 +4018,7 @@ func TestContext2Plan_taintDestroyInterpolatedCountRace(t *testing.T) {
 			},
 		})
 
-		plan, diags := ctx.Plan(m, state.DeepCopy(), SimplePlanOpts(plans.NormalMode, testInputValuesUnset(m.Module.Variables)))
+		plan, diags := ctx.Plan(context.Background(), m, state.DeepCopy(), SimplePlanOpts(plans.NormalMode, testInputValuesUnset(m.Module.Variables)))
 		if diags.HasErrors() {
 			t.Fatalf("unexpected errors: %s", diags.Err())
 		}
@@ -4013,7 +4073,7 @@ func TestContext2Plan_targeted(t *testing.T) {
 		},
 	})
 
-	plan, diags := ctx.Plan(m, states.NewState(), &PlanOpts{
+	plan, diags := ctx.Plan(context.Background(), m, states.NewState(), &PlanOpts{
 		Mode: plans.NormalMode,
 		Targets: []addrs.Targetable{
 			addrs.RootModuleInstance.Resource(
@@ -4053,6 +4113,57 @@ func TestContext2Plan_targeted(t *testing.T) {
 	}
 }
 
+// All exclude flag tests in this file are inspired by a counterpart target flag test
+// Usually that test exists right before the exclude flag test
+
+func TestContext2Plan_excluded(t *testing.T) {
+	m := testModule(t, "plan-targeted")
+	p := testProvider("aws")
+	p.PlanResourceChangeFn = testDiffFn
+	ctx := testContext2(t, &ContextOpts{
+		Providers: map[addrs.Provider]providers.Factory{
+			addrs.NewDefaultProvider("aws"): testProviderFuncFixed(p),
+		},
+	})
+
+	plan, diags := ctx.Plan(context.Background(), m, states.NewState(), &PlanOpts{
+		Mode: plans.NormalMode,
+		Excludes: []addrs.Targetable{
+			addrs.RootModuleInstance.Resource(addrs.ManagedResourceMode, "aws_instance", "foo"),
+		},
+	})
+	if diags.HasErrors() {
+		t.Fatalf("unexpected errors: %s", diags.Err())
+	}
+	schema := p.GetProviderSchemaResponse.ResourceTypes["aws_instance"].Block
+	ty := schema.ImpliedType()
+
+	if len(plan.Changes.Resources) != 1 {
+		t.Fatal("expected 1 changes, got", len(plan.Changes.Resources))
+	}
+
+	for _, res := range plan.Changes.Resources {
+		ric, err := res.Decode(ty)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		switch i := ric.Addr.String(); i {
+		case "module.mod[0].aws_instance.foo":
+			if res.Action != plans.Create {
+				t.Fatalf("resource %s should be created", i)
+			}
+			checkVals(t, objectVal(t, schema, map[string]cty.Value{
+				"id":   cty.UnknownVal(cty.String),
+				"num":  cty.NumberIntVal(2),
+				"type": cty.UnknownVal(cty.String),
+			}), ric.After)
+		default:
+			t.Fatal("unknown instance:", i)
+		}
+	}
+}
+
 // Test that targeting a module properly plans any inputs that depend
 // on another module.
 func TestContext2Plan_targetedCrossModule(t *testing.T) {
@@ -4065,7 +4176,7 @@ func TestContext2Plan_targetedCrossModule(t *testing.T) {
 		},
 	})
 
-	plan, diags := ctx.Plan(m, states.NewState(), &PlanOpts{
+	plan, diags := ctx.Plan(context.Background(), m, states.NewState(), &PlanOpts{
 		Mode: plans.NormalMode,
 		Targets: []addrs.Targetable{
 			addrs.RootModuleInstance.Child("B", addrs.NoKey),
@@ -4108,6 +4219,33 @@ func TestContext2Plan_targetedCrossModule(t *testing.T) {
 	}
 }
 
+// Test that excluding a module properly plans and excludes any
+// dependent modules.
+func TestContext2Plan_excludedCrossModule(t *testing.T) {
+	m := testModule(t, "plan-targeted-cross-module")
+	p := testProvider("aws")
+	p.PlanResourceChangeFn = testDiffFn
+	ctx := testContext2(t, &ContextOpts{
+		Providers: map[addrs.Provider]providers.Factory{
+			addrs.NewDefaultProvider("aws"): testProviderFuncFixed(p),
+		},
+	})
+
+	plan, diags := ctx.Plan(context.Background(), m, states.NewState(), &PlanOpts{
+		Mode: plans.NormalMode,
+		Excludes: []addrs.Targetable{
+			addrs.RootModuleInstance.Child("A", addrs.NoKey),
+		},
+	})
+	if diags.HasErrors() {
+		t.Fatalf("unexpected errors: %s", diags.Err())
+	}
+
+	if len(plan.Changes.Resources) != 0 {
+		t.Fatal("expected 0 changes, got", len(plan.Changes.Resources))
+	}
+}
+
 func TestContext2Plan_targetedModuleWithProvider(t *testing.T) {
 	m := testModule(t, "plan-targeted-module-with-provider")
 	p := testProvider("null")
@@ -4130,7 +4268,7 @@ func TestContext2Plan_targetedModuleWithProvider(t *testing.T) {
 		},
 	})
 
-	plan, diags := ctx.Plan(m, states.NewState(), &PlanOpts{
+	plan, diags := ctx.Plan(context.Background(), m, states.NewState(), &PlanOpts{
 		Mode: plans.NormalMode,
 		Targets: []addrs.Targetable{
 			addrs.RootModuleInstance.Child("child2", addrs.NoKey),
@@ -4158,6 +4296,56 @@ func TestContext2Plan_targetedModuleWithProvider(t *testing.T) {
 	}
 }
 
+func TestContext2Plan_excludedModuleWithProvider(t *testing.T) {
+	m := testModule(t, "plan-targeted-module-with-provider")
+	p := testProvider("null")
+	p.GetProviderSchemaResponse = getProviderSchemaResponseFromProviderSchema(&ProviderSchema{
+		Provider: &configschema.Block{
+			Attributes: map[string]*configschema.Attribute{
+				"key": {Type: cty.String, Optional: true},
+			},
+		},
+		ResourceTypes: map[string]*configschema.Block{
+			"null_resource": {
+				Attributes: map[string]*configschema.Attribute{},
+			},
+		},
+	})
+
+	ctx := testContext2(t, &ContextOpts{
+		Providers: map[addrs.Provider]providers.Factory{
+			addrs.NewDefaultProvider("null"): testProviderFuncFixed(p),
+		},
+	})
+
+	plan, diags := ctx.Plan(context.Background(), m, states.NewState(), &PlanOpts{
+		Mode: plans.NormalMode,
+		Excludes: []addrs.Targetable{
+			addrs.RootModuleInstance.Child("child1", addrs.NoKey),
+		},
+	})
+	if diags.HasErrors() {
+		t.Fatalf("unexpected errors: %s", diags.Err())
+	}
+
+	schema := p.GetProviderSchemaResponse.ResourceTypes["null_resource"].Block
+	ty := schema.ImpliedType()
+
+	if len(plan.Changes.Resources) != 1 {
+		t.Fatal("expected 1 changes, got", len(plan.Changes.Resources))
+	}
+
+	res := plan.Changes.Resources[0]
+	ric, err := res.Decode(ty)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if ric.Addr.String() != "module.child2.null_resource.foo" {
+		t.Fatalf("unexpected resource: %s", ric.Addr)
+	}
+}
+
 func TestContext2Plan_targetedOrphan(t *testing.T) {
 	m := testModule(t, "plan-targeted-orphan")
 	p := testProvider("aws")
@@ -4170,7 +4358,8 @@ func TestContext2Plan_targetedOrphan(t *testing.T) {
 			Status:    states.ObjectReady,
 			AttrsJSON: []byte(`{"id":"i-789xyz"}`),
 		},
-		mustProviderConfig(`provider["registry.terraform.io/hashicorp/aws"]`),
+		mustProviderConfig(`provider["registry.opentofu.org/hashicorp/aws"]`),
+		addrs.NoKey,
 	)
 	root.SetResourceInstanceCurrent(
 		mustResourceInstanceAddr("aws_instance.nottargeted").Resource,
@@ -4178,7 +4367,8 @@ func TestContext2Plan_targetedOrphan(t *testing.T) {
 			Status:    states.ObjectReady,
 			AttrsJSON: []byte(`{"id":"i-abc123"}`),
 		},
-		mustProviderConfig(`provider["registry.terraform.io/hashicorp/aws"]`),
+		mustProviderConfig(`provider["registry.opentofu.org/hashicorp/aws"]`),
+		addrs.NoKey,
 	)
 
 	ctx := testContext2(t, &ContextOpts{
@@ -4187,11 +4377,78 @@ func TestContext2Plan_targetedOrphan(t *testing.T) {
 		},
 	})
 
-	plan, diags := ctx.Plan(m, state, &PlanOpts{
+	plan, diags := ctx.Plan(context.Background(), m, state, &PlanOpts{
 		Mode: plans.DestroyMode,
 		Targets: []addrs.Targetable{
 			addrs.RootModuleInstance.Resource(
 				addrs.ManagedResourceMode, "aws_instance", "orphan",
+			),
+		},
+	})
+	if diags.HasErrors() {
+		t.Fatalf("unexpected errors: %s", diags.Err())
+	}
+
+	schema := p.GetProviderSchemaResponse.ResourceTypes["aws_instance"].Block
+	ty := schema.ImpliedType()
+
+	if len(plan.Changes.Resources) != 1 {
+		t.Fatal("expected 1 changes, got", len(plan.Changes.Resources))
+	}
+
+	for _, res := range plan.Changes.Resources {
+		ric, err := res.Decode(ty)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		switch i := ric.Addr.String(); i {
+		case "aws_instance.orphan":
+			if res.Action != plans.Delete {
+				t.Fatalf("resource %s should be destroyed", ric.Addr)
+			}
+		default:
+			t.Fatal("unknown instance:", i)
+		}
+	}
+}
+
+func TestContext2Plan_excludedOrphan(t *testing.T) {
+	m := testModule(t, "plan-targeted-orphan")
+	p := testProvider("aws")
+
+	state := states.NewState()
+	root := state.EnsureModule(addrs.RootModuleInstance)
+	root.SetResourceInstanceCurrent(
+		mustResourceInstanceAddr("aws_instance.orphan").Resource,
+		&states.ResourceInstanceObjectSrc{
+			Status:    states.ObjectReady,
+			AttrsJSON: []byte(`{"id":"i-789xyz"}`),
+		},
+		mustProviderConfig(`provider["registry.opentofu.org/hashicorp/aws"]`),
+		addrs.NoKey,
+	)
+	root.SetResourceInstanceCurrent(
+		mustResourceInstanceAddr("aws_instance.nottargeted").Resource,
+		&states.ResourceInstanceObjectSrc{
+			Status:    states.ObjectReady,
+			AttrsJSON: []byte(`{"id":"i-abc123"}`),
+		},
+		mustProviderConfig(`provider["registry.opentofu.org/hashicorp/aws"]`),
+		addrs.NoKey,
+	)
+
+	ctx := testContext2(t, &ContextOpts{
+		Providers: map[addrs.Provider]providers.Factory{
+			addrs.NewDefaultProvider("aws"): testProviderFuncFixed(p),
+		},
+	})
+
+	plan, diags := ctx.Plan(context.Background(), m, state, &PlanOpts{
+		Mode: plans.DestroyMode,
+		Excludes: []addrs.Targetable{
+			addrs.RootModuleInstance.Resource(
+				addrs.ManagedResourceMode, "aws_instance", "nottargeted",
 			),
 		},
 	})
@@ -4236,7 +4493,8 @@ func TestContext2Plan_targetedModuleOrphan(t *testing.T) {
 			Status:    states.ObjectReady,
 			AttrsJSON: []byte(`{"id":"i-789xyz"}`),
 		},
-		mustProviderConfig(`provider["registry.terraform.io/hashicorp/aws"]`),
+		mustProviderConfig(`provider["registry.opentofu.org/hashicorp/aws"]`),
+		addrs.NoKey,
 	)
 	child.SetResourceInstanceCurrent(
 		mustResourceInstanceAddr("aws_instance.nottargeted").Resource,
@@ -4244,7 +4502,8 @@ func TestContext2Plan_targetedModuleOrphan(t *testing.T) {
 			Status:    states.ObjectReady,
 			AttrsJSON: []byte(`{"id":"i-abc123"}`),
 		},
-		mustProviderConfig(`provider["registry.terraform.io/hashicorp/aws"]`),
+		mustProviderConfig(`provider["registry.opentofu.org/hashicorp/aws"]`),
+		addrs.NoKey,
 	)
 
 	ctx := testContext2(t, &ContextOpts{
@@ -4253,11 +4512,75 @@ func TestContext2Plan_targetedModuleOrphan(t *testing.T) {
 		},
 	})
 
-	plan, diags := ctx.Plan(m, state, &PlanOpts{
+	plan, diags := ctx.Plan(context.Background(), m, state, &PlanOpts{
 		Mode: plans.DestroyMode,
 		Targets: []addrs.Targetable{
 			addrs.RootModuleInstance.Child("child", addrs.NoKey).Resource(
 				addrs.ManagedResourceMode, "aws_instance", "orphan",
+			),
+		},
+	})
+	if diags.HasErrors() {
+		t.Fatalf("unexpected errors: %s", diags.Err())
+	}
+
+	schema := p.GetProviderSchemaResponse.ResourceTypes["aws_instance"].Block
+	ty := schema.ImpliedType()
+
+	if len(plan.Changes.Resources) != 1 {
+		t.Fatal("expected 1 changes, got", len(plan.Changes.Resources))
+	}
+
+	res := plan.Changes.Resources[0]
+	ric, err := res.Decode(ty)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if ric.Addr.String() != "module.child.aws_instance.orphan" {
+		t.Fatalf("unexpected resource :%s", ric.Addr)
+	}
+	if res.Action != plans.Delete {
+		t.Fatalf("resource %s should be deleted", ric.Addr)
+	}
+}
+
+func TestContext2Plan_excludedModuleOrphan(t *testing.T) {
+	m := testModule(t, "plan-targeted-module-orphan")
+	p := testProvider("aws")
+
+	state := states.NewState()
+	child := state.EnsureModule(addrs.RootModuleInstance.Child("child", addrs.NoKey))
+	child.SetResourceInstanceCurrent(
+		mustResourceInstanceAddr("aws_instance.orphan").Resource,
+		&states.ResourceInstanceObjectSrc{
+			Status:    states.ObjectReady,
+			AttrsJSON: []byte(`{"id":"i-789xyz"}`),
+		},
+		mustProviderConfig(`provider["registry.opentofu.org/hashicorp/aws"]`),
+		addrs.NoKey,
+	)
+	child.SetResourceInstanceCurrent(
+		mustResourceInstanceAddr("aws_instance.nottargeted").Resource,
+		&states.ResourceInstanceObjectSrc{
+			Status:    states.ObjectReady,
+			AttrsJSON: []byte(`{"id":"i-abc123"}`),
+		},
+		mustProviderConfig(`provider["registry.opentofu.org/hashicorp/aws"]`),
+		addrs.NoKey,
+	)
+
+	ctx := testContext2(t, &ContextOpts{
+		Providers: map[addrs.Provider]providers.Factory{
+			addrs.NewDefaultProvider("aws"): testProviderFuncFixed(p),
+		},
+	})
+
+	plan, diags := ctx.Plan(context.Background(), m, state, &PlanOpts{
+		Mode: plans.DestroyMode,
+		Excludes: []addrs.Targetable{
+			addrs.RootModuleInstance.Child("child", addrs.NoKey).Resource(
+				addrs.ManagedResourceMode, "aws_instance", "nottargeted",
 			),
 		},
 	})
@@ -4296,7 +4619,7 @@ func TestContext2Plan_targetedModuleUntargetedVariable(t *testing.T) {
 		},
 	})
 
-	plan, diags := ctx.Plan(m, states.NewState(), &PlanOpts{
+	plan, diags := ctx.Plan(context.Background(), m, states.NewState(), &PlanOpts{
 		Targets: []addrs.Targetable{
 			addrs.RootModuleInstance.Resource(
 				addrs.ManagedResourceMode, "aws_instance", "blue",
@@ -4341,9 +4664,64 @@ func TestContext2Plan_targetedModuleUntargetedVariable(t *testing.T) {
 	}
 }
 
-// ensure that outputs missing references due to targetting are removed from
+func TestContext2Plan_excludedModuleUntargetedVariable(t *testing.T) {
+	m := testModule(t, "plan-targeted-module-untargeted-variable")
+	p := testProvider("aws")
+	p.PlanResourceChangeFn = testDiffFn
+	ctx := testContext2(t, &ContextOpts{
+		Providers: map[addrs.Provider]providers.Factory{
+			addrs.NewDefaultProvider("aws"): testProviderFuncFixed(p),
+		},
+	})
+
+	plan, diags := ctx.Plan(context.Background(), m, states.NewState(), &PlanOpts{
+		Excludes: []addrs.Targetable{
+			// Exclude green instance, which should also exclude the dependent green module
+			addrs.RootModuleInstance.Resource(
+				addrs.ManagedResourceMode, "aws_instance", "green",
+			),
+		},
+	})
+	if diags.HasErrors() {
+		t.Fatalf("unexpected errors: %s", diags.Err())
+	}
+
+	schema := p.GetProviderSchemaResponse.ResourceTypes["aws_instance"].Block
+	ty := schema.ImpliedType()
+
+	if len(plan.Changes.Resources) != 2 {
+		t.Fatal("expected 2 changes, got", len(plan.Changes.Resources))
+	}
+
+	for _, res := range plan.Changes.Resources {
+		ric, err := res.Decode(ty)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.Action != plans.Create {
+			t.Fatalf("resource %s should be created", ric.Addr)
+		}
+		switch i := ric.Addr.String(); i {
+		case "aws_instance.blue":
+			checkVals(t, objectVal(t, schema, map[string]cty.Value{
+				"id":   cty.UnknownVal(cty.String),
+				"type": cty.UnknownVal(cty.String),
+			}), ric.After)
+		case "module.blue_mod.aws_instance.mod":
+			checkVals(t, objectVal(t, schema, map[string]cty.Value{
+				"id":    cty.UnknownVal(cty.String),
+				"value": cty.UnknownVal(cty.String),
+				"type":  cty.UnknownVal(cty.String),
+			}), ric.After)
+		default:
+			t.Fatal("unknown instance:", i)
+		}
+	}
+}
+
+// ensure that outputs missing references due to targeting are removed from
 // the graph.
-func TestContext2Plan_outputContainsTargetedResource(t *testing.T) {
+func TestContext2Plan_outputContainsUntargetedResource(t *testing.T) {
 	m := testModule(t, "plan-untargeted-resource-output")
 	p := testProvider("aws")
 	ctx := testContext2(t, &ContextOpts{
@@ -4352,13 +4730,14 @@ func TestContext2Plan_outputContainsTargetedResource(t *testing.T) {
 		},
 	})
 
-	_, diags := ctx.Plan(m, states.NewState(), &PlanOpts{
+	plan, diags := ctx.Plan(context.Background(), m, states.NewState(), &PlanOpts{
 		Targets: []addrs.Targetable{
 			addrs.RootModuleInstance.Child("mod", addrs.NoKey).Resource(
 				addrs.ManagedResourceMode, "aws_instance", "a",
 			),
 		},
 	})
+
 	if diags.HasErrors() {
 		t.Fatalf("err: %s", diags)
 	}
@@ -4370,6 +4749,77 @@ func TestContext2Plan_outputContainsTargetedResource(t *testing.T) {
 	}
 	if got, want := diags[0].Description().Summary, "Resource targeting is in effect"; got != want {
 		t.Errorf("wrong diagnostic summary %#v; want %#v", got, want)
+	}
+
+	if len(plan.Changes.Outputs) != 0 {
+		t.Fatalf("expected 0 output changes, but got %d", len(plan.Changes.Outputs))
+	}
+
+	schema := p.GetProviderSchemaResponse.ResourceTypes["aws_instance"].Block
+	ty := schema.ImpliedType()
+
+	res := plan.Changes.Resources[0]
+	ric, err := res.Decode(ty)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if ric.Addr.String() != "module.mod.aws_instance.a[0]" {
+		t.Fatalf("unexpected resource :%s", ric.Addr)
+	}
+	if res.Action != plans.Create {
+		t.Fatalf("resource %s should be deleted", ric.Addr)
+	}
+}
+
+func TestContext2Plan_outputContainsExcludedResource(t *testing.T) {
+	m := testModule(t, "plan-untargeted-resource-output")
+	p := testProvider("aws")
+	ctx := testContext2(t, &ContextOpts{
+		Providers: map[addrs.Provider]providers.Factory{
+			addrs.NewDefaultProvider("aws"): testProviderFuncFixed(p),
+		},
+	})
+
+	plan, diags := ctx.Plan(context.Background(), m, states.NewState(), &PlanOpts{
+		Excludes: []addrs.Targetable{
+			addrs.RootModuleInstance.Child("mod", addrs.NoKey).Resource(
+				addrs.ManagedResourceMode, "aws_instance", "b",
+			),
+		},
+	})
+
+	if diags.HasErrors() {
+		t.Fatalf("err: %s", diags)
+	}
+	if len(diags) != 1 {
+		t.Fatalf("got %d diagnostics; want 1", diags)
+	}
+	if got, want := diags[0].Severity(), tfdiags.Warning; got != want {
+		t.Errorf("wrong diagnostic severity %#v; want %#v", got, want)
+	}
+	if got, want := diags[0].Description().Summary, "Resource targeting is in effect"; got != want {
+		t.Errorf("wrong diagnostic summary %#v; want %#v", got, want)
+	}
+
+	if len(plan.Changes.Outputs) != 0 {
+		t.Fatalf("expected 0 output changes, but got %d", len(plan.Changes.Outputs))
+	}
+
+	schema := p.GetProviderSchemaResponse.ResourceTypes["aws_instance"].Block
+	ty := schema.ImpliedType()
+
+	res := plan.Changes.Resources[0]
+	ric, err := res.Decode(ty)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if ric.Addr.String() != "module.mod.aws_instance.a[0]" {
+		t.Fatalf("unexpected resource :%s", ric.Addr)
+	}
+	if res.Action != plans.Create {
+		t.Fatalf("resource %s should be deleted", ric.Addr)
 	}
 }
 
@@ -4392,7 +4842,8 @@ func TestContext2Plan_targetedOverTen(t *testing.T) {
 				Status:    states.ObjectReady,
 				AttrsJSON: []byte(attrs),
 			},
-			mustProviderConfig(`provider["registry.terraform.io/hashicorp/aws"]`),
+			mustProviderConfig(`provider["registry.opentofu.org/hashicorp/aws"]`),
+			addrs.NoKey,
 		)
 	}
 
@@ -4402,8 +4853,63 @@ func TestContext2Plan_targetedOverTen(t *testing.T) {
 		},
 	})
 
-	plan, diags := ctx.Plan(m, state, &PlanOpts{
+	plan, diags := ctx.Plan(context.Background(), m, state, &PlanOpts{
 		Targets: []addrs.Targetable{
+			addrs.RootModuleInstance.ResourceInstance(
+				addrs.ManagedResourceMode, "aws_instance", "foo", addrs.IntKey(1),
+			),
+		},
+	})
+	if diags.HasErrors() {
+		t.Fatalf("unexpected errors: %s", diags.Err())
+	}
+
+	schema := p.GetProviderSchemaResponse.ResourceTypes["aws_instance"].Block
+	ty := schema.ImpliedType()
+
+	for _, res := range plan.Changes.Resources {
+		ric, err := res.Decode(ty)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.Action != plans.NoOp {
+			t.Fatalf("unexpected action %s for %s", res.Action, ric.Addr)
+		}
+	}
+}
+
+// https://github.com/hashicorp/terraform/issues/4515 - Making sure it doesn't happen with exclude flag
+func TestContext2Plan_excludedOverTen(t *testing.T) {
+	m := testModule(t, "plan-targeted-over-ten")
+	p := testProvider("aws")
+	p.PlanResourceChangeFn = testDiffFn
+
+	state := states.NewState()
+	root := state.EnsureModule(addrs.RootModuleInstance)
+	for i := 0; i < 13; i++ {
+		key := fmt.Sprintf("aws_instance.foo[%d]", i)
+		id := fmt.Sprintf("i-abc%d", i)
+		attrs := fmt.Sprintf(`{"id":"%s","type":"aws_instance"}`, id)
+
+		root.SetResourceInstanceCurrent(
+			mustResourceInstanceAddr(key).Resource,
+			&states.ResourceInstanceObjectSrc{
+				Status:    states.ObjectReady,
+				AttrsJSON: []byte(attrs),
+			},
+			mustProviderConfig(`provider["registry.opentofu.org/hashicorp/aws"]`),
+			addrs.NoKey,
+		)
+	}
+
+	ctx := testContext2(t, &ContextOpts{
+		Providers: map[addrs.Provider]providers.Factory{
+			addrs.NewDefaultProvider("aws"): testProviderFuncFixed(p),
+		},
+	})
+
+	plan, diags := ctx.Plan(context.Background(), m, state, &PlanOpts{
+		Excludes: []addrs.Targetable{
 			addrs.RootModuleInstance.ResourceInstance(
 				addrs.ManagedResourceMode, "aws_instance", "foo", addrs.IntKey(1),
 			),
@@ -4452,7 +4958,7 @@ func TestContext2Plan_provider(t *testing.T) {
 		},
 	}
 
-	if _, err := ctx.Plan(m, states.NewState(), opts); err != nil {
+	if _, err := ctx.Plan(context.Background(), m, states.NewState(), opts); err != nil {
 		t.Fatalf("err: %s", err)
 	}
 
@@ -4470,7 +4976,7 @@ func TestContext2Plan_varListErr(t *testing.T) {
 		},
 	})
 
-	_, err := ctx.Plan(m, states.NewState(), DefaultPlanOpts)
+	_, err := ctx.Plan(context.Background(), m, states.NewState(), DefaultPlanOpts)
 
 	if err == nil {
 		t.Fatal("should error")
@@ -4490,7 +4996,8 @@ func TestContext2Plan_ignoreChanges(t *testing.T) {
 			Status:    states.ObjectReady,
 			AttrsJSON: []byte(`{"id":"bar","ami":"ami-abcd1234","type":"aws_instance"}`),
 		},
-		mustProviderConfig(`provider["registry.terraform.io/hashicorp/aws"]`),
+		mustProviderConfig(`provider["registry.opentofu.org/hashicorp/aws"]`),
+		addrs.NoKey,
 	)
 
 	ctx := testContext2(t, &ContextOpts{
@@ -4499,7 +5006,7 @@ func TestContext2Plan_ignoreChanges(t *testing.T) {
 		},
 	})
 
-	plan, diags := ctx.Plan(m, state, &PlanOpts{
+	plan, diags := ctx.Plan(context.Background(), m, state, &PlanOpts{
 		Mode: plans.NormalMode,
 		SetVariables: InputValues{
 			"foo": &InputValue{
@@ -4562,7 +5069,8 @@ func TestContext2Plan_ignoreChangesWildcard(t *testing.T) {
 			Status:    states.ObjectReady,
 			AttrsJSON: []byte(`{"id":"bar","ami":"ami-abcd1234","instance":"t2.micro","type":"aws_instance","foo":"bar"}`),
 		},
-		mustProviderConfig(`provider["registry.terraform.io/hashicorp/aws"]`),
+		mustProviderConfig(`provider["registry.opentofu.org/hashicorp/aws"]`),
+		addrs.NoKey,
 	)
 
 	ctx := testContext2(t, &ContextOpts{
@@ -4571,7 +5079,7 @@ func TestContext2Plan_ignoreChangesWildcard(t *testing.T) {
 		},
 	})
 
-	plan, diags := ctx.Plan(m, state, &PlanOpts{
+	plan, diags := ctx.Plan(context.Background(), m, state, &PlanOpts{
 		Mode: plans.NormalMode,
 		SetVariables: InputValues{
 			"foo": &InputValue{
@@ -4628,6 +5136,7 @@ func TestContext2Plan_ignoreChangesInMap(t *testing.T) {
 				Provider: addrs.NewDefaultProvider("test"),
 				Module:   addrs.RootModule,
 			},
+			addrs.NoKey,
 		)
 	})
 	m := testModule(t, "plan-ignore-changes-in-map")
@@ -4638,7 +5147,7 @@ func TestContext2Plan_ignoreChangesInMap(t *testing.T) {
 		},
 	})
 
-	plan, diags := ctx.Plan(m, s, DefaultPlanOpts)
+	plan, diags := ctx.Plan(context.Background(), m, s, DefaultPlanOpts)
 	if diags.HasErrors() {
 		t.Fatalf("unexpected errors: %s", diags.Err())
 	}
@@ -4684,7 +5193,8 @@ func TestContext2Plan_ignoreChangesSensitive(t *testing.T) {
 			Status:    states.ObjectReady,
 			AttrsJSON: []byte(`{"id":"bar","ami":"ami-abcd1234","type":"aws_instance"}`),
 		},
-		mustProviderConfig(`provider["registry.terraform.io/hashicorp/aws"]`),
+		mustProviderConfig(`provider["registry.opentofu.org/hashicorp/aws"]`),
+		addrs.NoKey,
 	)
 
 	ctx := testContext2(t, &ContextOpts{
@@ -4693,7 +5203,7 @@ func TestContext2Plan_ignoreChangesSensitive(t *testing.T) {
 		},
 	})
 
-	plan, diags := ctx.Plan(m, state, &PlanOpts{
+	plan, diags := ctx.Plan(context.Background(), m, state, &PlanOpts{
 		Mode: plans.NormalMode,
 		SetVariables: InputValues{
 			"foo": &InputValue{
@@ -4763,7 +5273,7 @@ func TestContext2Plan_moduleMapLiteral(t *testing.T) {
 		},
 	})
 
-	_, diags := ctx.Plan(m, states.NewState(), DefaultPlanOpts)
+	_, diags := ctx.Plan(context.Background(), m, states.NewState(), DefaultPlanOpts)
 	if diags.HasErrors() {
 		t.Fatalf("unexpected errors: %s", diags.Err())
 	}
@@ -4805,7 +5315,7 @@ func TestContext2Plan_computedValueInMap(t *testing.T) {
 		},
 	})
 
-	plan, diags := ctx.Plan(m, states.NewState(), DefaultPlanOpts)
+	plan, diags := ctx.Plan(context.Background(), m, states.NewState(), DefaultPlanOpts)
 	if diags.HasErrors() {
 		t.Fatalf("unexpected errors: %s", diags.Err())
 	}
@@ -4860,7 +5370,7 @@ func TestContext2Plan_moduleVariableFromSplat(t *testing.T) {
 		},
 	})
 
-	plan, diags := ctx.Plan(m, states.NewState(), DefaultPlanOpts)
+	plan, diags := ctx.Plan(context.Background(), m, states.NewState(), DefaultPlanOpts)
 	if diags.HasErrors() {
 		t.Fatalf("unexpected errors: %s", diags.Err())
 	}
@@ -4942,7 +5452,7 @@ func TestContext2Plan_createBeforeDestroy_depends_datasource(t *testing.T) {
 		},
 	})
 
-	plan, diags := ctx.Plan(m, states.NewState(), DefaultPlanOpts)
+	plan, diags := ctx.Plan(context.Background(), m, states.NewState(), DefaultPlanOpts)
 	if diags.HasErrors() {
 		t.Fatalf("unexpected errors: %s", diags.Err())
 	}
@@ -5016,7 +5526,7 @@ func TestContext2Plan_listOrder(t *testing.T) {
 		},
 	})
 
-	plan, diags := ctx.Plan(m, states.NewState(), DefaultPlanOpts)
+	plan, diags := ctx.Plan(context.Background(), m, states.NewState(), DefaultPlanOpts)
 	if diags.HasErrors() {
 		t.Fatalf("unexpected errors: %s", diags.Err())
 	}
@@ -5075,7 +5585,8 @@ func TestContext2Plan_ignoreChangesWithFlatmaps(t *testing.T) {
 				"lst":["j"]
 			}`),
 		},
-		mustProviderConfig(`provider["registry.terraform.io/hashicorp/aws"]`),
+		mustProviderConfig(`provider["registry.opentofu.org/hashicorp/aws"]`),
+		addrs.NoKey,
 	)
 
 	ctx := testContext2(t, &ContextOpts{
@@ -5084,7 +5595,7 @@ func TestContext2Plan_ignoreChangesWithFlatmaps(t *testing.T) {
 		},
 	})
 
-	plan, diags := ctx.Plan(m, state, DefaultPlanOpts)
+	plan, diags := ctx.Plan(context.Background(), m, state, DefaultPlanOpts)
 	if diags.HasErrors() {
 		t.Fatalf("unexpected errors: %s", diags.Err())
 	}
@@ -5146,7 +5657,8 @@ func TestContext2Plan_resourceNestedCount(t *testing.T) {
 			Status:    states.ObjectReady,
 			AttrsJSON: []byte(`{"id":"foo0","type":"aws_instance"}`),
 		},
-		mustProviderConfig(`provider["registry.terraform.io/hashicorp/aws"]`),
+		mustProviderConfig(`provider["registry.opentofu.org/hashicorp/aws"]`),
+		addrs.NoKey,
 	)
 	root.SetResourceInstanceCurrent(
 		mustResourceInstanceAddr("aws_instance.foo[1]").Resource,
@@ -5154,7 +5666,8 @@ func TestContext2Plan_resourceNestedCount(t *testing.T) {
 			Status:    states.ObjectReady,
 			AttrsJSON: []byte(`{"id":"foo1","type":"aws_instance"}`),
 		},
-		mustProviderConfig(`provider["registry.terraform.io/hashicorp/aws"]`),
+		mustProviderConfig(`provider["registry.opentofu.org/hashicorp/aws"]`),
+		addrs.NoKey,
 	)
 	root.SetResourceInstanceCurrent(
 		mustResourceInstanceAddr("aws_instance.bar[0]").Resource,
@@ -5163,7 +5676,8 @@ func TestContext2Plan_resourceNestedCount(t *testing.T) {
 			AttrsJSON:    []byte(`{"id":"bar0","type":"aws_instance"}`),
 			Dependencies: []addrs.ConfigResource{mustConfigResourceAddr("aws_instance.foo")},
 		},
-		mustProviderConfig(`provider["registry.terraform.io/hashicorp/aws"]`),
+		mustProviderConfig(`provider["registry.opentofu.org/hashicorp/aws"]`),
+		addrs.NoKey,
 	)
 	root.SetResourceInstanceCurrent(
 		mustResourceInstanceAddr("aws_instance.bar[1]").Resource,
@@ -5172,7 +5686,8 @@ func TestContext2Plan_resourceNestedCount(t *testing.T) {
 			AttrsJSON:    []byte(`{"id":"bar1","type":"aws_instance"}`),
 			Dependencies: []addrs.ConfigResource{mustConfigResourceAddr("aws_instance.foo")},
 		},
-		mustProviderConfig(`provider["registry.terraform.io/hashicorp/aws"]`),
+		mustProviderConfig(`provider["registry.opentofu.org/hashicorp/aws"]`),
+		addrs.NoKey,
 	)
 	root.SetResourceInstanceCurrent(
 		mustResourceInstanceAddr("aws_instance.baz[0]").Resource,
@@ -5181,7 +5696,8 @@ func TestContext2Plan_resourceNestedCount(t *testing.T) {
 			AttrsJSON:    []byte(`{"id":"baz0","type":"aws_instance"}`),
 			Dependencies: []addrs.ConfigResource{mustConfigResourceAddr("aws_instance.bar")},
 		},
-		mustProviderConfig(`provider["registry.terraform.io/hashicorp/aws"]`),
+		mustProviderConfig(`provider["registry.opentofu.org/hashicorp/aws"]`),
+		addrs.NoKey,
 	)
 	root.SetResourceInstanceCurrent(
 		mustResourceInstanceAddr("aws_instance.baz[1]").Resource,
@@ -5190,7 +5706,8 @@ func TestContext2Plan_resourceNestedCount(t *testing.T) {
 			AttrsJSON:    []byte(`{"id":"baz1","type":"aws_instance"}`),
 			Dependencies: []addrs.ConfigResource{mustConfigResourceAddr("aws_instance.bar")},
 		},
-		mustProviderConfig(`provider["registry.terraform.io/hashicorp/aws"]`),
+		mustProviderConfig(`provider["registry.opentofu.org/hashicorp/aws"]`),
+		addrs.NoKey,
 	)
 	ctx := testContext2(t, &ContextOpts{
 		Providers: map[addrs.Provider]providers.Factory{
@@ -5198,12 +5715,12 @@ func TestContext2Plan_resourceNestedCount(t *testing.T) {
 		},
 	})
 
-	diags := ctx.Validate(m)
+	diags := ctx.Validate(context.Background(), m)
 	if diags.HasErrors() {
 		t.Fatalf("validate errors: %s", diags.Err())
 	}
 
-	plan, diags := ctx.Plan(m, state, DefaultPlanOpts)
+	plan, diags := ctx.Plan(context.Background(), m, state, DefaultPlanOpts)
 	if diags.HasErrors() {
 		t.Fatalf("plan errors: %s", diags.Err())
 	}
@@ -5252,7 +5769,7 @@ func TestContext2Plan_computedAttrRefTypeMismatch(t *testing.T) {
 		},
 	})
 
-	_, diags := ctx.Plan(m, states.NewState(), DefaultPlanOpts)
+	_, diags := ctx.Plan(context.Background(), m, states.NewState(), DefaultPlanOpts)
 	if !diags.HasErrors() {
 		t.Fatalf("Succeeded; want type mismatch error for 'ami' argument")
 	}
@@ -5282,12 +5799,12 @@ func TestContext2Plan_selfRef(t *testing.T) {
 		},
 	})
 
-	diags := c.Validate(m)
+	diags := c.Validate(context.Background(), m)
 	if diags.HasErrors() {
 		t.Fatalf("unexpected validation failure: %s", diags.Err())
 	}
 
-	_, diags = c.Plan(m, states.NewState(), DefaultPlanOpts)
+	_, diags = c.Plan(context.Background(), m, states.NewState(), DefaultPlanOpts)
 	if !diags.HasErrors() {
 		t.Fatalf("plan succeeded; want error")
 	}
@@ -5318,12 +5835,12 @@ func TestContext2Plan_selfRefMulti(t *testing.T) {
 		},
 	})
 
-	diags := c.Validate(m)
+	diags := c.Validate(context.Background(), m)
 	if diags.HasErrors() {
 		t.Fatalf("unexpected validation failure: %s", diags.Err())
 	}
 
-	_, diags = c.Plan(m, states.NewState(), DefaultPlanOpts)
+	_, diags = c.Plan(context.Background(), m, states.NewState(), DefaultPlanOpts)
 	if !diags.HasErrors() {
 		t.Fatalf("plan succeeded; want error")
 	}
@@ -5354,12 +5871,12 @@ func TestContext2Plan_selfRefMultiAll(t *testing.T) {
 		},
 	})
 
-	diags := c.Validate(m)
+	diags := c.Validate(context.Background(), m)
 	if diags.HasErrors() {
 		t.Fatalf("unexpected validation failure: %s", diags.Err())
 	}
 
-	_, diags = c.Plan(m, states.NewState(), DefaultPlanOpts)
+	_, diags = c.Plan(context.Background(), m, states.NewState(), DefaultPlanOpts)
 	if !diags.HasErrors() {
 		t.Fatalf("plan succeeded; want error")
 	}
@@ -5399,7 +5916,7 @@ output "out" {
 		},
 	})
 
-	_, diags := ctx.Plan(m, states.NewState(), DefaultPlanOpts)
+	_, diags := ctx.Plan(context.Background(), m, states.NewState(), DefaultPlanOpts)
 	if !diags.HasErrors() {
 		// Should get this error:
 		// Unsupported attribute: This object does not have an attribute named "missing"
@@ -5445,7 +5962,7 @@ resource "aws_instance" "foo" {
 		},
 	})
 
-	_, diags := ctx.Plan(m, states.NewState(), DefaultPlanOpts)
+	_, diags := ctx.Plan(context.Background(), m, states.NewState(), DefaultPlanOpts)
 	if !diags.HasErrors() {
 		// Should get this error:
 		// Unsupported attribute: This object does not have an attribute named "missing"
@@ -5491,7 +6008,7 @@ resource "aws_instance" "foo" {
 		},
 	})
 
-	_, diags := ctx.Plan(m, states.NewState(), DefaultPlanOpts)
+	_, diags := ctx.Plan(context.Background(), m, states.NewState(), DefaultPlanOpts)
 	if !diags.HasErrors() {
 		// Should get this error:
 		// Unsupported attribute: This object does not have an attribute named "missing"
@@ -5514,7 +6031,7 @@ func TestContext2Plan_variableSensitivity(t *testing.T) {
 		},
 	})
 
-	plan, diags := ctx.Plan(m, states.NewState(), SimplePlanOpts(plans.NormalMode, testInputValuesUnset(m.Module.Variables)))
+	plan, diags := ctx.Plan(context.Background(), m, states.NewState(), SimplePlanOpts(plans.NormalMode, testInputValuesUnset(m.Module.Variables)))
 	if diags.HasErrors() {
 		t.Fatalf("unexpected errors: %s", diags.Err())
 	}
@@ -5574,7 +6091,7 @@ func TestContext2Plan_variableSensitivityModule(t *testing.T) {
 		},
 	})
 
-	plan, diags := ctx.Plan(m, states.NewState(), &PlanOpts{
+	plan, diags := ctx.Plan(context.Background(), m, states.NewState(), &PlanOpts{
 		Mode: plans.NormalMode,
 		SetVariables: InputValues{
 			"sensitive_var": {Value: cty.NilVal},
@@ -5684,7 +6201,7 @@ func TestContext2Plan_requiredModuleOutput(t *testing.T) {
 		},
 	})
 
-	plan, diags := ctx.Plan(m, states.NewState(), DefaultPlanOpts)
+	plan, diags := ctx.Plan(context.Background(), m, states.NewState(), DefaultPlanOpts)
 	if diags.HasErrors() {
 		t.Fatalf("unexpected errors: %s", diags.Err())
 	}
@@ -5747,7 +6264,7 @@ func TestContext2Plan_requiredModuleObject(t *testing.T) {
 		},
 	})
 
-	plan, diags := ctx.Plan(m, states.NewState(), DefaultPlanOpts)
+	plan, diags := ctx.Plan(context.Background(), m, states.NewState(), DefaultPlanOpts)
 	if diags.HasErrors() {
 		t.Fatalf("unexpected errors: %s", diags.Err())
 	}
@@ -5811,7 +6328,8 @@ resource "aws_instance" "foo" {
 			Status:    states.ObjectReady,
 			AttrsJSON: []byte(`{"id":"child","type":"aws_instance"}`),
 		},
-		mustProviderConfig(`provider["registry.terraform.io/hashicorp/aws"]`),
+		mustProviderConfig(`provider["registry.opentofu.org/hashicorp/aws"]`),
+		addrs.NoKey,
 	)
 	state.EnsureModule(addrs.RootModuleInstance.Child("mod", addrs.IntKey(1))).SetResourceInstanceCurrent(
 		mustResourceInstanceAddr("aws_instance.foo").Resource,
@@ -5819,7 +6337,8 @@ resource "aws_instance" "foo" {
 			Status:    states.ObjectReady,
 			AttrsJSON: []byte(`{"id":"child","type":"aws_instance"}`),
 		},
-		mustProviderConfig(`provider["registry.terraform.io/hashicorp/aws"]`),
+		mustProviderConfig(`provider["registry.opentofu.org/hashicorp/aws"]`),
+		addrs.NoKey,
 	)
 
 	p := testProvider("aws")
@@ -5830,7 +6349,7 @@ resource "aws_instance" "foo" {
 		},
 	})
 
-	plan, diags := ctx.Plan(m, state, DefaultPlanOpts)
+	plan, diags := ctx.Plan(context.Background(), m, state, DefaultPlanOpts)
 	if diags.HasErrors() {
 		t.Fatal(diags.ErrWithWarnings())
 	}
@@ -5889,7 +6408,7 @@ output"out" {
 		},
 	})
 
-	_, diags := ctx.Plan(m, states.NewState(), DefaultPlanOpts)
+	_, diags := ctx.Plan(context.Background(), m, states.NewState(), DefaultPlanOpts)
 	if diags.HasErrors() {
 		t.Fatal(diags.ErrWithWarnings())
 	}
@@ -5931,7 +6450,7 @@ resource "aws_instance" "foo" {
 		},
 	})
 
-	plan, diags := ctx.Plan(m, states.NewState(), &PlanOpts{
+	plan, diags := ctx.Plan(context.Background(), m, states.NewState(), &PlanOpts{
 		Mode:    plans.NormalMode,
 		Targets: targets,
 	})
@@ -5945,6 +6464,72 @@ resource "aws_instance" "foo" {
 		// the whole mode[2]
 		`module.mod[2].aws_instance.foo[0]`: plans.Create,
 		`module.mod[2].aws_instance.foo[1]`: plans.Create,
+	}
+
+	for _, res := range plan.Changes.Resources {
+		want := expected[res.Addr.String()]
+		if res.Action != want {
+			t.Fatalf("expected %s action, got: %q %s", want, res.Addr, res.Action)
+		}
+		delete(expected, res.Addr.String())
+	}
+
+	for res, action := range expected {
+		t.Errorf("missing %s change for %s", action, res)
+	}
+}
+
+func TestContext2Plan_excludeExpandedAddress(t *testing.T) {
+	m := testModuleInline(t, map[string]string{
+		"main.tf": `
+module "mod" {
+  count = 3
+  source = "./mod"
+}
+`,
+		"mod/main.tf": `
+resource "aws_instance" "foo" {
+  count = 2
+}
+`,
+	})
+
+	p := testProvider("aws")
+
+	excludes := []addrs.Targetable{}
+	exclude, diags := addrs.ParseTargetStr("module.mod[1].aws_instance.foo[0]")
+	if diags.HasErrors() {
+		t.Fatal(diags.ErrWithWarnings())
+	}
+	excludes = append(excludes, exclude.Subject)
+
+	exclude, diags = addrs.ParseTargetStr("module.mod[2]")
+	if diags.HasErrors() {
+		t.Fatal(diags.ErrWithWarnings())
+	}
+	excludes = append(excludes, exclude.Subject)
+
+	ctx := testContext2(t, &ContextOpts{
+		Providers: map[addrs.Provider]providers.Factory{
+			addrs.NewDefaultProvider("aws"): testProviderFuncFixed(p),
+		},
+	})
+
+	plan, diags := ctx.Plan(context.Background(), m, states.NewState(), &PlanOpts{
+		Mode:     plans.NormalMode,
+		Excludes: excludes,
+	})
+	if diags.HasErrors() {
+		t.Fatal(diags.ErrWithWarnings())
+	}
+
+	expected := map[string]plans.Action{
+		// the whole mod[0], which was not excluded
+		`module.mod[0].aws_instance.foo[0]`: plans.Create,
+		`module.mod[0].aws_instance.foo[1]`: plans.Create,
+		// the unexcluded mod[1] instance
+		`module.mod[1].aws_instance.foo[1]`: plans.Create,
+		// the whole of mod[2] was excluded
 	}
 
 	for _, res := range plan.Changes.Resources {
@@ -5989,7 +6574,7 @@ resource "aws_instance" "foo" {
 		},
 	})
 
-	plan, diags := ctx.Plan(m, states.NewState(), &PlanOpts{
+	plan, diags := ctx.Plan(context.Background(), m, states.NewState(), &PlanOpts{
 		Mode:    plans.NormalMode,
 		Targets: targets,
 	})
@@ -6000,6 +6585,62 @@ resource "aws_instance" "foo" {
 	expected := map[string]plans.Action{
 		// the single targeted mod[1] instance
 		`module.mod[1].aws_instance.foo`: plans.Create,
+	}
+
+	for _, res := range plan.Changes.Resources {
+		want := expected[res.Addr.String()]
+		if res.Action != want {
+			t.Fatalf("expected %s action, got: %q %s", want, res.Addr, res.Action)
+		}
+		delete(expected, res.Addr.String())
+	}
+
+	for res, action := range expected {
+		t.Errorf("missing %s change for %s", action, res)
+	}
+}
+
+func TestContext2Plan_excludeResourceInModuleInstance(t *testing.T) {
+	m := testModuleInline(t, map[string]string{
+		"main.tf": `
+module "mod" {
+  count = 3
+  source = "./mod"
+}
+`,
+		"mod/main.tf": `
+resource "aws_instance" "foo" {
+}
+`,
+	})
+
+	p := testProvider("aws")
+
+	exclude, diags := addrs.ParseTargetStr("module.mod[1].aws_instance.foo")
+	if diags.HasErrors() {
+		t.Fatal(diags.ErrWithWarnings())
+	}
+
+	excludes := []addrs.Targetable{exclude.Subject}
+
+	ctx := testContext2(t, &ContextOpts{
+		Providers: map[addrs.Provider]providers.Factory{
+			addrs.NewDefaultProvider("aws"): testProviderFuncFixed(p),
+		},
+	})
+
+	plan, diags := ctx.Plan(context.Background(), m, states.NewState(), &PlanOpts{
+		Mode:     plans.NormalMode,
+		Excludes: excludes,
+	})
+	if diags.HasErrors() {
+		t.Fatal(diags.ErrWithWarnings())
+	}
+
+	expected := map[string]plans.Action{
+		// the unexcluded instances from mod[0] and mod[2]
+		`module.mod[0].aws_instance.foo`: plans.Create,
+		`module.mod[2].aws_instance.foo`: plans.Create,
 	}
 
 	for _, res := range plan.Changes.Resources {
@@ -6052,7 +6693,7 @@ resource "aws_instance" "foo" {
 		},
 	})
 
-	_, diags := ctx.Plan(m, states.NewState(), DefaultPlanOpts)
+	_, diags := ctx.Plan(context.Background(), m, states.NewState(), DefaultPlanOpts)
 	if diags.HasErrors() {
 		t.Fatal(diags.ErrWithWarnings())
 	}
@@ -6098,7 +6739,8 @@ data "test_data_source" "foo" {}
 			Status:    states.ObjectReady,
 			AttrsJSON: []byte(`{"id":"data_id", "foo":"foo"}`),
 		},
-		mustProviderConfig(`provider["registry.terraform.io/hashicorp/test"]`),
+		mustProviderConfig(`provider["registry.opentofu.org/hashicorp/test"]`),
+		addrs.NoKey,
 	)
 
 	ctx := testContext2(t, &ContextOpts{
@@ -6107,7 +6749,7 @@ data "test_data_source" "foo" {}
 		},
 	})
 
-	plan, diags := ctx.Plan(m, state, DefaultPlanOpts)
+	plan, diags := ctx.Plan(context.Background(), m, state, DefaultPlanOpts)
 	if diags.HasErrors() {
 		t.Fatal(diags.ErrWithWarnings())
 	}
@@ -6147,7 +6789,8 @@ resource "test_instance" "b" {
 			AttrsJSON:    []byte(`{"id":"a0"}`),
 			Dependencies: []addrs.ConfigResource{},
 		},
-		mustProviderConfig(`provider["registry.terraform.io/hashicorp/test"]`),
+		mustProviderConfig(`provider["registry.opentofu.org/hashicorp/test"]`),
+		addrs.NoKey,
 	)
 	root.SetResourceInstanceCurrent(
 		mustResourceInstanceAddr("test_instance.b").Resource,
@@ -6156,7 +6799,8 @@ resource "test_instance" "b" {
 			AttrsJSON:    []byte(`{"id":"b"}`),
 			Dependencies: []addrs.ConfigResource{mustConfigResourceAddr("test_instance.a")},
 		},
-		mustProviderConfig(`provider["registry.terraform.io/hashicorp/test"]`),
+		mustProviderConfig(`provider["registry.opentofu.org/hashicorp/test"]`),
+		addrs.NoKey,
 	)
 
 	ctx := testContext2(t, &ContextOpts{
@@ -6165,7 +6809,7 @@ resource "test_instance" "b" {
 		},
 	})
 
-	plan, diags := ctx.Plan(m, state, DefaultPlanOpts)
+	plan, diags := ctx.Plan(context.Background(), m, state, DefaultPlanOpts)
 	assertNoErrors(t, diags)
 
 	t.Run("test_instance.a[0]", func(t *testing.T) {
@@ -6212,7 +6856,7 @@ func TestContext2Plan_targetedModuleInstance(t *testing.T) {
 		},
 	})
 
-	plan, diags := ctx.Plan(m, states.NewState(), &PlanOpts{
+	plan, diags := ctx.Plan(context.Background(), m, states.NewState(), &PlanOpts{
 		Mode: plans.NormalMode,
 		Targets: []addrs.Targetable{
 			addrs.RootModuleInstance.Child("mod", addrs.IntKey(0)),
@@ -6250,6 +6894,57 @@ func TestContext2Plan_targetedModuleInstance(t *testing.T) {
 	}
 }
 
+func TestContext2Plan_excludedModuleInstance(t *testing.T) {
+	m := testModule(t, "plan-targeted")
+	p := testProvider("aws")
+	p.PlanResourceChangeFn = testDiffFn
+	ctx := testContext2(t, &ContextOpts{
+		Providers: map[addrs.Provider]providers.Factory{
+			addrs.NewDefaultProvider("aws"): testProviderFuncFixed(p),
+		},
+	})
+
+	plan, diags := ctx.Plan(context.Background(), m, states.NewState(), &PlanOpts{
+		Mode: plans.NormalMode,
+		Excludes: []addrs.Targetable{
+			addrs.RootModuleInstance.Resource(
+				addrs.ManagedResourceMode, "aws_instance", "bar",
+			),
+			addrs.RootModuleInstance.Child("mod", addrs.IntKey(0)),
+		},
+	})
+	if diags.HasErrors() {
+		t.Fatalf("unexpected errors: %s", diags.Err())
+	}
+	schema := p.GetProviderSchemaResponse.ResourceTypes["aws_instance"].Block
+	ty := schema.ImpliedType()
+
+	if len(plan.Changes.Resources) != 1 {
+		t.Fatal("expected 1 changes, got", len(plan.Changes.Resources))
+	}
+
+	for _, res := range plan.Changes.Resources {
+		ric, err := res.Decode(ty)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		switch i := ric.Addr.String(); i {
+		case "aws_instance.foo":
+			if res.Action != plans.Create {
+				t.Fatalf("resource %s should be created", i)
+			}
+			checkVals(t, objectVal(t, schema, map[string]cty.Value{
+				"id":   cty.UnknownVal(cty.String),
+				"num":  cty.NumberIntVal(2),
+				"type": cty.UnknownVal(cty.String),
+			}), ric.After)
+		default:
+			t.Fatal("unknown instance:", i)
+		}
+	}
+}
+
 func TestContext2Plan_dataRefreshedInPlan(t *testing.T) {
 	m := testModuleInline(t, map[string]string{
 		"main.tf": `
@@ -6271,7 +6966,7 @@ data "test_data_source" "d" {
 		},
 	})
 
-	plan, diags := ctx.Plan(m, states.NewState(), DefaultPlanOpts)
+	plan, diags := ctx.Plan(context.Background(), m, states.NewState(), DefaultPlanOpts)
 	if diags.HasErrors() {
 		t.Fatal(diags.ErrWithWarnings())
 	}
@@ -6334,7 +7029,7 @@ data "test_data_source" "e" {
 		},
 	})
 
-	plan, diags := ctx.Plan(m, states.NewState(), DefaultPlanOpts)
+	plan, diags := ctx.Plan(context.Background(), m, states.NewState(), DefaultPlanOpts)
 	assertNoErrors(t, diags)
 
 	rc := plan.Changes.ResourceInstance(addrs.Resource{
@@ -6414,7 +7109,7 @@ data "test_data_source" "d" {
 		},
 	})
 
-	_, diags := ctx.Plan(m, states.NewState(), DefaultPlanOpts)
+	_, diags := ctx.Plan(context.Background(), m, states.NewState(), DefaultPlanOpts)
 	if !diags.HasErrors() {
 		t.Fatalf("successful plan; want an error")
 	}
@@ -6443,7 +7138,8 @@ resource "test_instance" "a" {
 			AttrsJSON:    []byte(`{"id":"a","type":"test_instance"}`),
 			Dependencies: []addrs.ConfigResource{},
 		},
-		mustProviderConfig(`provider["registry.terraform.io/hashicorp/test"]`),
+		mustProviderConfig(`provider["registry.opentofu.org/hashicorp/test"]`),
+		addrs.NoKey,
 	)
 
 	ctx := testContext2(t, &ContextOpts{
@@ -6452,7 +7148,7 @@ resource "test_instance" "a" {
 		},
 	})
 
-	plan, diags := ctx.Plan(m, state, &PlanOpts{
+	plan, diags := ctx.Plan(context.Background(), m, state, &PlanOpts{
 		Mode:        plans.NormalMode,
 		SkipRefresh: true,
 	})
@@ -6514,7 +7210,7 @@ data "test_data_source" "b" {
 		},
 	})
 
-	_, diags := ctx.Plan(m, states.NewState(), DefaultPlanOpts)
+	_, diags := ctx.Plan(context.Background(), m, states.NewState(), DefaultPlanOpts)
 	assertNoErrors(t, diags)
 
 	// The change to data source a should not prevent data source b from being
@@ -6554,7 +7250,7 @@ resource "test_instance" "a" {
 			addrs.NewDefaultProvider("test"): testProviderFuncFixed(p),
 		},
 	})
-	_, diags := ctx.Plan(m, states.NewState(), DefaultPlanOpts)
+	_, diags := ctx.Plan(context.Background(), m, states.NewState(), DefaultPlanOpts)
 	if diags.HasErrors() {
 		t.Fatal(diags.Err())
 	}
@@ -6615,7 +7311,8 @@ resource "test_instance" "a" {
 			AttrsJSON:    []byte(`{"id":"a","data":"foo"}`),
 			Dependencies: []addrs.ConfigResource{},
 		},
-		mustProviderConfig(`provider["registry.terraform.io/hashicorp/test"]`),
+		mustProviderConfig(`provider["registry.opentofu.org/hashicorp/test"]`),
+		addrs.NoKey,
 	)
 
 	ctx := testContext2(t, &ContextOpts{
@@ -6623,7 +7320,7 @@ resource "test_instance" "a" {
 			addrs.NewDefaultProvider("test"): testProviderFuncFixed(p),
 		},
 	})
-	plan, diags := ctx.Plan(m, state, DefaultPlanOpts)
+	plan, diags := ctx.Plan(context.Background(), m, state, DefaultPlanOpts)
 	if diags.HasErrors() {
 		t.Fatal(diags.Err())
 	}
@@ -6678,7 +7375,8 @@ resource "test_instance" "a" {
 			AttrsJSON:    []byte(`{"id":"a","data":"foo"}`),
 			Dependencies: []addrs.ConfigResource{},
 		},
-		mustProviderConfig(`provider["registry.terraform.io/hashicorp/test"]`),
+		mustProviderConfig(`provider["registry.opentofu.org/hashicorp/test"]`),
+		addrs.NoKey,
 	)
 
 	ctx := testContext2(t, &ContextOpts{
@@ -6686,7 +7384,7 @@ resource "test_instance" "a" {
 			addrs.NewDefaultProvider("test"): testProviderFuncFixed(p),
 		},
 	})
-	_, diags := ctx.Plan(m, state, DefaultPlanOpts)
+	_, diags := ctx.Plan(context.Background(), m, state, DefaultPlanOpts)
 	if diags.HasErrors() {
 		t.Fatal(diags.Err())
 	}
@@ -6736,7 +7434,8 @@ resource "test_instance" "a" {
 			AttrsJSON:    []byte(`{"id":"orig","data":"orig"}`),
 			Dependencies: []addrs.ConfigResource{},
 		},
-		mustProviderConfig(`provider["registry.terraform.io/hashicorp/test"]`),
+		mustProviderConfig(`provider["registry.opentofu.org/hashicorp/test"]`),
+		addrs.NoKey,
 	)
 
 	ctx := testContext2(t, &ContextOpts{
@@ -6744,7 +7443,7 @@ resource "test_instance" "a" {
 			addrs.NewDefaultProvider("test"): testProviderFuncFixed(p),
 		},
 	})
-	plan, diags := ctx.Plan(m, state, DefaultPlanOpts)
+	plan, diags := ctx.Plan(context.Background(), m, state, DefaultPlanOpts)
 	if diags.HasErrors() {
 		t.Fatal(diags.Err())
 	}
@@ -6775,7 +7474,8 @@ resource "test_instance" "a" {
 			AttrsJSON:    []byte(`{"id":"a","data":"foo"}`),
 			Dependencies: []addrs.ConfigResource{},
 		},
-		mustProviderConfig(`provider["registry.terraform.io/hashicorp/test"]`),
+		mustProviderConfig(`provider["registry.opentofu.org/hashicorp/test"]`),
+		addrs.NoKey,
 	)
 
 	// the provider for this data source is no longer in the config, but that
@@ -6787,7 +7487,8 @@ resource "test_instance" "a" {
 			AttrsJSON:    []byte(`{"id":"d"}`),
 			Dependencies: []addrs.ConfigResource{},
 		},
-		mustProviderConfig(`provider["registry.terraform.io/local/test"]`),
+		mustProviderConfig(`provider["registry.opentofu.org/local/test"]`),
+		addrs.NoKey,
 	)
 
 	ctx := testContext2(t, &ContextOpts{
@@ -6796,10 +7497,10 @@ resource "test_instance" "a" {
 			// We still need to be able to locate the provider to decode the
 			// state, since we do not know during init that this provider is
 			// only used for an orphaned data source.
-			addrs.NewProvider("registry.terraform.io", "local", "test"): testProviderFuncFixed(p),
+			addrs.NewProvider("registry.opentofu.org", "local", "test"): testProviderFuncFixed(p),
 		},
 	})
-	_, diags := ctx.Plan(m, state, DefaultPlanOpts)
+	_, diags := ctx.Plan(context.Background(), m, state, DefaultPlanOpts)
 	if diags.HasErrors() {
 		t.Fatal(diags.Err())
 	}
@@ -6845,9 +7546,10 @@ resource "test_resource" "foo" {
 				Provider: addrs.NewDefaultProvider("test"),
 				Module:   addrs.RootModule,
 			},
+			addrs.NoKey,
 		)
 	})
-	plan, diags := ctx.Plan(m, state, SimplePlanOpts(plans.NormalMode, testInputValuesUnset(m.Module.Variables)))
+	plan, diags := ctx.Plan(context.Background(), m, state, SimplePlanOpts(plans.NormalMode, testInputValuesUnset(m.Module.Variables)))
 	if diags.HasErrors() {
 		t.Fatal(diags.Err())
 	}
@@ -6869,7 +7571,7 @@ func TestContext2Plan_variableCustomValidationsSensitive(t *testing.T) {
 		},
 	})
 
-	_, diags := ctx.Plan(m, states.NewState(), DefaultPlanOpts)
+	_, diags := ctx.Plan(context.Background(), m, states.NewState(), DefaultPlanOpts)
 	if !diags.HasErrors() {
 		t.Fatal("succeeded; want errors")
 	}
@@ -6893,7 +7595,7 @@ output "planned" {
 		r := s.Module(addrs.RootModuleInstance)
 		r.SetOutputValue("planned", cty.NullVal(cty.DynamicPseudoType), false)
 	})
-	plan, diags := ctx.Plan(m, state, DefaultPlanOpts)
+	plan, diags := ctx.Plan(context.Background(), m, state, DefaultPlanOpts)
 	if diags.HasErrors() {
 		t.Fatal(diags.Err())
 	}
@@ -6916,7 +7618,7 @@ output "planned" {
 	})
 
 	ctx := testContext2(t, &ContextOpts{})
-	plan, diags := ctx.Plan(m, states.NewState(), DefaultPlanOpts)
+	plan, diags := ctx.Plan(context.Background(), m, states.NewState(), DefaultPlanOpts)
 	if diags.HasErrors() {
 		t.Fatal(diags.Err())
 	}

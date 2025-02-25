@@ -1,4 +1,6 @@
-// Copyright (c) HashiCorp, Inc.
+// Copyright (c) The OpenTofu Authors
+// SPDX-License-Identifier: MPL-2.0
+// Copyright (c) 2023 HashiCorp, Inc.
 // SPDX-License-Identifier: MPL-2.0
 
 package cloud
@@ -53,7 +55,7 @@ func testOperationPlanWithTimeout(t *testing.T, configDir string, timeout time.D
 	// Many of our tests use an overridden "null" provider that's just in-memory
 	// inside the test process, not a separate plugin on disk.
 	depLocks := depsfile.NewLocks()
-	depLocks.SetProviderOverridden(addrs.MustParseProviderSourceString("registry.terraform.io/hashicorp/null"))
+	depLocks.SetProviderOverridden(addrs.MustParseProviderSourceString("registry.opentofu.org/hashicorp/null"))
 
 	return &backend.Operation{
 		ConfigDir:       configDir,
@@ -90,7 +92,7 @@ func TestCloud_planBasic(t *testing.T) {
 	}
 
 	output := b.CLI.(*cli.MockUi).OutputWriter.String()
-	if !strings.Contains(output, "Running plan in Terraform Cloud") {
+	if !strings.Contains(output, "Running plan in cloud backend") {
 		t.Fatalf("expected TFC header in output: %s", output)
 	}
 	if !strings.Contains(output, "1 to add, 0 to change, 0 to destroy") {
@@ -204,7 +206,7 @@ func TestCloud_planLongLine(t *testing.T) {
 	}
 
 	output := b.CLI.(*cli.MockUi).OutputWriter.String()
-	if !strings.Contains(output, "Running plan in Terraform Cloud") {
+	if !strings.Contains(output, "Running plan in cloud backend") {
 		t.Fatalf("expected TFC header in output: %s", output)
 	}
 	if !strings.Contains(output, "1 to add, 0 to change, 0 to destroy") {
@@ -388,7 +390,7 @@ func TestCloud_planWithPath(t *testing.T) {
 	}
 
 	output := b.CLI.(*cli.MockUi).OutputWriter.String()
-	if !strings.Contains(output, "Running plan in Terraform Cloud") {
+	if !strings.Contains(output, "Running plan in cloud backend") {
 		t.Fatalf("expected TFC header in output: %s", output)
 	}
 	if !strings.Contains(output, "1 to add, 0 to change, 0 to destroy") {
@@ -399,7 +401,7 @@ func TestCloud_planWithPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error loading cloud plan file: %v", err)
 	}
-	if !strings.Contains(plan.RunID, "run-") || plan.Hostname != "app.terraform.io" {
+	if !strings.Contains(plan.RunID, "run-") || plan.Hostname != tfeHost {
 		t.Fatalf("unexpected contents in saved cloud plan: %v", plan)
 	}
 
@@ -563,6 +565,39 @@ func TestCloud_planWithTarget(t *testing.T) {
 	}
 }
 
+// Planning with an exclude flag should error
+func TestCloud_planWithExclude(t *testing.T) {
+	b, bCleanup := testBackendWithName(t)
+	defer bCleanup()
+
+	op, configCleanup, done := testOperationPlan(t, "./testdata/plan")
+	defer configCleanup()
+
+	addr, _ := addrs.ParseAbsResourceStr("null_resource.foo")
+
+	op.Workspace = testBackendSingleWorkspaceName
+	op.Excludes = []addrs.Targetable{addr}
+
+	run, err := b.Operation(context.Background(), op)
+	if err != nil {
+		t.Fatalf("error starting operation: %v", err)
+	}
+
+	<-run.Done()
+	output := done(t)
+	if run.Result == backend.OperationSuccess {
+		t.Fatal("expected apply operation to fail")
+	}
+	if !run.PlanEmpty {
+		t.Fatalf("expected plan to be empty")
+	}
+
+	errOutput := output.Stderr()
+	if !strings.Contains(errOutput, "-exclude option is not supported") {
+		t.Fatalf("expected -exclude option is not supported error, got: %v", errOutput)
+	}
+}
+
 func TestCloud_planWithReplace(t *testing.T) {
 	b, bCleanup := testBackendWithName(t)
 	defer bCleanup()
@@ -626,7 +661,7 @@ func TestCloud_planWithRequiredVariables(t *testing.T) {
 	}
 
 	output := b.CLI.(*cli.MockUi).OutputWriter.String()
-	if !strings.Contains(output, "Running plan in Terraform Cloud") {
+	if !strings.Contains(output, "Running plan in cloud backend") {
 		t.Fatalf("unexpected TFC header in output: %s", output)
 	}
 }
@@ -695,10 +730,7 @@ func TestCloud_planNoChanges(t *testing.T) {
 func TestCloud_planForceLocal(t *testing.T) {
 	// Set TF_FORCE_LOCAL_BACKEND so the cloud backend will use
 	// the local backend with itself as embedded backend.
-	if err := os.Setenv("TF_FORCE_LOCAL_BACKEND", "1"); err != nil {
-		t.Fatalf("error setting environment variable TF_FORCE_LOCAL_BACKEND: %v", err)
-	}
-	defer os.Unsetenv("TF_FORCE_LOCAL_BACKEND")
+	t.Setenv("TF_FORCE_LOCAL_BACKEND", "1")
 
 	b, bCleanup := testBackendWithName(t)
 	defer bCleanup()
@@ -727,7 +759,7 @@ func TestCloud_planForceLocal(t *testing.T) {
 	}
 
 	output := b.CLI.(*cli.MockUi).OutputWriter.String()
-	if strings.Contains(output, "Running plan in Terraform Cloud") {
+	if strings.Contains(output, "Running plan in cloud backend") {
 		t.Fatalf("unexpected TFC header in output: %s", output)
 	}
 	if output := done(t).Stdout(); !strings.Contains(output, "1 to add, 0 to change, 0 to destroy") {
@@ -763,7 +795,7 @@ func TestCloud_planWithoutOperationsEntitlement(t *testing.T) {
 	}
 
 	output := b.CLI.(*cli.MockUi).OutputWriter.String()
-	if strings.Contains(output, "Running plan in Terraform Cloud") {
+	if strings.Contains(output, "Running plan in cloud backend") {
 		t.Fatalf("unexpected TFC header in output: %s", output)
 	}
 	if output := done(t).Stdout(); !strings.Contains(output, "1 to add, 0 to change, 0 to destroy") {
@@ -813,7 +845,7 @@ func TestCloud_planWorkspaceWithoutOperations(t *testing.T) {
 	}
 
 	output := b.CLI.(*cli.MockUi).OutputWriter.String()
-	if strings.Contains(output, "Running plan in Terraform Cloud") {
+	if strings.Contains(output, "Running plan in cloud backend") {
 		t.Fatalf("unexpected TFC header in output: %s", output)
 	}
 	if output := done(t).Stdout(); !strings.Contains(output, "1 to add, 0 to change, 0 to destroy") {
@@ -881,11 +913,11 @@ func TestCloud_planLockTimeout(t *testing.T) {
 	}
 
 	output := b.CLI.(*cli.MockUi).OutputWriter.String()
-	if !strings.Contains(output, "Running plan in Terraform Cloud") {
+	if !strings.Contains(output, "Running plan in cloud backend") {
 		t.Fatalf("expected TFC header in output: %s", output)
 	}
 	if !strings.Contains(output, "Lock timeout exceeded") {
-		t.Fatalf("expected lock timout error in output: %s", output)
+		t.Fatalf("expected lock timeout error in output: %s", output)
 	}
 	if strings.Contains(output, "1 to add, 0 to change, 0 to destroy") {
 		t.Fatalf("unexpected plan summary in output: %s", output)
@@ -979,7 +1011,7 @@ func TestCloud_planWithWorkingDirectory(t *testing.T) {
 	if !strings.Contains(output, "The remote workspace is configured to work with configuration") {
 		t.Fatalf("expected working directory warning: %s", output)
 	}
-	if !strings.Contains(output, "Running plan in Terraform Cloud") {
+	if !strings.Contains(output, "Running plan in cloud backend") {
 		t.Fatalf("expected TFC header in output: %s", output)
 	}
 	if !strings.Contains(output, "1 to add, 0 to change, 0 to destroy") {
@@ -1035,7 +1067,7 @@ func TestCloud_planWithWorkingDirectoryFromCurrentPath(t *testing.T) {
 	}
 
 	output := b.CLI.(*cli.MockUi).OutputWriter.String()
-	if !strings.Contains(output, "Running plan in Terraform Cloud") {
+	if !strings.Contains(output, "Running plan in cloud backend") {
 		t.Fatalf("expected TFC header in output: %s", output)
 	}
 	if !strings.Contains(output, "1 to add, 0 to change, 0 to destroy") {
@@ -1067,7 +1099,7 @@ func TestCloud_planCostEstimation(t *testing.T) {
 	}
 
 	output := b.CLI.(*cli.MockUi).OutputWriter.String()
-	if !strings.Contains(output, "Running plan in Terraform Cloud") {
+	if !strings.Contains(output, "Running plan in cloud backend") {
 		t.Fatalf("expected TFC header in output: %s", output)
 	}
 	if !strings.Contains(output, "Resources: 1 of 1 estimated") {
@@ -1102,7 +1134,7 @@ func TestCloud_planPolicyPass(t *testing.T) {
 	}
 
 	output := b.CLI.(*cli.MockUi).OutputWriter.String()
-	if !strings.Contains(output, "Running plan in Terraform Cloud") {
+	if !strings.Contains(output, "Running plan in cloud backend") {
 		t.Fatalf("expected TFC header in output: %s", output)
 	}
 	if !strings.Contains(output, "Sentinel Result: true") {
@@ -1142,7 +1174,7 @@ func TestCloud_planPolicyHardFail(t *testing.T) {
 	}
 
 	output := b.CLI.(*cli.MockUi).OutputWriter.String()
-	if !strings.Contains(output, "Running plan in Terraform Cloud") {
+	if !strings.Contains(output, "Running plan in cloud backend") {
 		t.Fatalf("expected TFC header in output: %s", output)
 	}
 	if !strings.Contains(output, "Sentinel Result: false") {
@@ -1182,7 +1214,7 @@ func TestCloud_planPolicySoftFail(t *testing.T) {
 	}
 
 	output := b.CLI.(*cli.MockUi).OutputWriter.String()
-	if !strings.Contains(output, "Running plan in Terraform Cloud") {
+	if !strings.Contains(output, "Running plan in cloud backend") {
 		t.Fatalf("expected TFC header in output: %s", output)
 	}
 	if !strings.Contains(output, "Sentinel Result: false") {
@@ -1217,7 +1249,7 @@ func TestCloud_planWithRemoteError(t *testing.T) {
 	}
 
 	output := b.CLI.(*cli.MockUi).OutputWriter.String()
-	if !strings.Contains(output, "Running plan in Terraform Cloud") {
+	if !strings.Contains(output, "Running plan in cloud backend") {
 		t.Fatalf("expected TFC header in output: %s", output)
 	}
 	if !strings.Contains(output, "null_resource.foo: 1 error") {
@@ -1282,7 +1314,7 @@ func TestCloud_planOtherError(t *testing.T) {
 	}
 
 	if !strings.Contains(err.Error(),
-		"Terraform Cloud returned an unexpected error:\n\nI'm a little teacup") {
+		"Cloud backend returned an unexpected error:\n\nI'm a little teacup") {
 		t.Fatalf("expected error message, got: %s", err.Error())
 	}
 }

@@ -1,4 +1,6 @@
-// Copyright (c) HashiCorp, Inc.
+// Copyright (c) The OpenTofu Authors
+// SPDX-License-Identifier: MPL-2.0
+// Copyright (c) 2023 HashiCorp, Inc.
 // SPDX-License-Identifier: MPL-2.0
 
 package remote
@@ -22,6 +24,7 @@ import (
 	"github.com/opentofu/opentofu/internal/cloud"
 	"github.com/opentofu/opentofu/internal/configs"
 	"github.com/opentofu/opentofu/internal/configs/configschema"
+	"github.com/opentofu/opentofu/internal/encryption"
 	"github.com/opentofu/opentofu/internal/httpclient"
 	"github.com/opentofu/opentofu/internal/providers"
 	"github.com/opentofu/opentofu/internal/states/remote"
@@ -38,9 +41,9 @@ const (
 )
 
 var (
-	tfeHost  = svchost.Hostname("app.terraform.io")
-	credsSrc = auth.StaticCredentialsSource(map[svchost.Hostname]map[string]interface{}{
-		tfeHost: {"token": testCred},
+	mockedBackendHost = "app.example.com"
+	credsSrc          = auth.StaticCredentialsSource(map[svchost.Hostname]map[string]interface{}{
+		svchost.Hostname(mockedBackendHost): {"token": testCred},
 	})
 )
 
@@ -70,7 +73,7 @@ func testInput(t *testing.T, answers map[string]string) *mockInput {
 
 func testBackendDefault(t *testing.T) (*Remote, func()) {
 	obj := cty.ObjectVal(map[string]cty.Value{
-		"hostname":     cty.StringVal("app.terraform.io"),
+		"hostname":     cty.StringVal(mockedBackendHost),
 		"organization": cty.StringVal("hashicorp"),
 		"token":        cty.NullVal(cty.String),
 		"workspaces": cty.ObjectVal(map[string]cty.Value{
@@ -83,7 +86,7 @@ func testBackendDefault(t *testing.T) (*Remote, func()) {
 
 func testBackendNoDefault(t *testing.T) (*Remote, func()) {
 	obj := cty.ObjectVal(map[string]cty.Value{
-		"hostname":     cty.StringVal("app.terraform.io"),
+		"hostname":     cty.StringVal(mockedBackendHost),
 		"organization": cty.StringVal("hashicorp"),
 		"token":        cty.NullVal(cty.String),
 		"workspaces": cty.ObjectVal(map[string]cty.Value{
@@ -96,7 +99,7 @@ func testBackendNoDefault(t *testing.T) (*Remote, func()) {
 
 func testBackendNoOperations(t *testing.T) (*Remote, func()) {
 	obj := cty.ObjectVal(map[string]cty.Value{
-		"hostname":     cty.StringVal("app.terraform.io"),
+		"hostname":     cty.StringVal(mockedBackendHost),
 		"organization": cty.StringVal("no-operations"),
 		"token":        cty.NullVal(cty.String),
 		"workspaces": cty.ObjectVal(map[string]cty.Value{
@@ -121,7 +124,7 @@ func testRemoteClient(t *testing.T) remote.Client {
 
 func testBackend(t *testing.T, obj cty.Value) (*Remote, func()) {
 	s := testServer(t)
-	b := New(testDisco(s))
+	b := New(testDisco(s), encryption.StateEncryptionDisabled())
 
 	// Configure the backend so the client is created.
 	newObj, valDiags := b.PrepareConfig(obj)
@@ -179,7 +182,7 @@ func testBackend(t *testing.T, obj cty.Value) (*Remote, func()) {
 }
 
 func testLocalBackend(t *testing.T, remote *Remote) backend.Enhanced {
-	b := backendLocal.NewWithBackend(remote)
+	b := backendLocal.NewWithBackend(remote, nil)
 
 	// Add a test provider to the local backend.
 	p := backendLocal.TestLocalProvider(t, b, "null", providers.ProviderSchema{
@@ -286,7 +289,7 @@ func testServer(t *testing.T) *httptest.Server {
 	return httptest.NewServer(mux)
 }
 
-// testDisco returns a *disco.Disco mapping app.terraform.io and
+// testDisco returns a *disco.Disco mapping to mockedBackendHost and
 // localhost to a local test server.
 func testDisco(s *httptest.Server) *disco.Disco {
 	services := map[string]interface{}{
@@ -297,7 +300,7 @@ func testDisco(s *httptest.Server) *disco.Disco {
 	d := disco.NewWithCredentialsSource(credsSrc)
 	d.SetUserAgent(httpclient.OpenTofuUserAgent(version.String()))
 
-	d.ForceHostServices(svchost.Hostname("app.terraform.io"), services)
+	d.ForceHostServices(svchost.Hostname(mockedBackendHost), services)
 	d.ForceHostServices(svchost.Hostname("localhost"), services)
 	return d
 }

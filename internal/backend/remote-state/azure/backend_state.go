@@ -1,4 +1,6 @@
-// Copyright (c) HashiCorp, Inc.
+// Copyright (c) The OpenTofu Authors
+// SPDX-License-Identifier: MPL-2.0
+// Copyright (c) 2023 HashiCorp, Inc.
 // SPDX-License-Identifier: MPL-2.0
 
 package azure
@@ -94,9 +96,10 @@ func (b *Backend) StateMgr(name string) (statemgr.Full, error) {
 		keyName:            b.path(name),
 		accountName:        b.accountName,
 		snapshot:           b.snapshot,
+		timeoutSeconds:     b.armClient.timeoutSeconds,
 	}
 
-	stateMgr := &remote.State{Client: client}
+	stateMgr := remote.NewState(client, b.encryption)
 
 	// Grab the value
 	if err := stateMgr.RefreshState(); err != nil {

@@ -1,4 +1,6 @@
-// Copyright (c) HashiCorp, Inc.
+// Copyright (c) The OpenTofu Authors
+// SPDX-License-Identifier: MPL-2.0
+// Copyright (c) 2023 HashiCorp, Inc.
 // SPDX-License-Identifier: MPL-2.0
 
 package remote
@@ -91,7 +93,7 @@ func TestRemoteStoredVariableValue(t *testing.T) {
 		"HCL computation": {
 			// This (stored expressions containing computation) is not a case
 			// we intentionally supported, but it became possible for remote
-			// operations in OpenTofu 0.12 (due to Terraform Cloud/Enterprise
+			// operations in Terraform 0.12 (due to Terraform Cloud/Enterprise
 			// just writing the HCL verbatim into generated `.tfvars` files).
 			// We support it here for consistency, and we continue to support
 			// it in both places for backward-compatibility. In practice,
@@ -212,7 +214,7 @@ func TestRemoteContextWithVars(t *testing.T) {
 			}
 			b.client.Variables.Create(context.TODO(), workspaceID, *v)
 
-			_, _, diags := b.LocalRun(op)
+			_, _, diags := b.LocalRun(context.Background(), op)
 
 			if test.WantError != "" {
 				if !diags.HasErrors() {
@@ -433,7 +435,7 @@ func TestRemoteVariablesDoNotOverride(t *testing.T) {
 				b.client.Variables.Create(context.TODO(), workspaceID, *v)
 			}
 
-			lr, _, diags := b.LocalRun(op)
+			lr, _, diags := b.LocalRun(context.Background(), op)
 
 			if diags.HasErrors() {
 				t.Fatalf("unexpected error\ngot:  %s\nwant: <no error>", diags.Err().Error())

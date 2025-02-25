@@ -1,4 +1,6 @@
-// Copyright (c) HashiCorp, Inc.
+// Copyright (c) The OpenTofu Authors
+// SPDX-License-Identifier: MPL-2.0
+// Copyright (c) 2023 HashiCorp, Inc.
 // SPDX-License-Identifier: MPL-2.0
 
 package local
@@ -10,6 +12,9 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/hashicorp/hcl/v2"
+	"github.com/zclconf/go-cty/cty"
+
 	"github.com/opentofu/opentofu/internal/backend"
 	"github.com/opentofu/opentofu/internal/configs"
 	"github.com/opentofu/opentofu/internal/configs/configload"
@@ -17,11 +22,11 @@ import (
 	"github.com/opentofu/opentofu/internal/states/statemgr"
 	"github.com/opentofu/opentofu/internal/tfdiags"
 	"github.com/opentofu/opentofu/internal/tofu"
-	"github.com/zclconf/go-cty/cty"
+	"github.com/opentofu/opentofu/internal/tofumigrate"
 )
 
 // backend.Local implementation.
-func (b *Local) LocalRun(op *backend.Operation) (*backend.LocalRun, statemgr.Full, tfdiags.Diagnostics) {
+func (b *Local) LocalRun(ctx context.Context, op *backend.Operation) (*backend.LocalRun, statemgr.Full, tfdiags.Diagnostics) {
 	// Make sure the type is invalid. We use this as a way to know not
 	// to ask for input/validate. We're modifying this through a pointer,
 	// so we're mutating an object that belongs to the caller here, which
@@ -32,11 +37,11 @@ func (b *Local) LocalRun(op *backend.Operation) (*backend.LocalRun, statemgr.Ful
 
 	op.StateLocker = op.StateLocker.WithContext(context.Background())
 
-	lr, _, stateMgr, diags := b.localRun(op)
+	lr, _, stateMgr, diags := b.localRun(ctx, op)
 	return lr, stateMgr, diags
 }
 
-func (b *Local) localRun(op *backend.Operation) (*backend.LocalRun, *configload.Snapshot, statemgr.Full, tfdiags.Diagnostics) {
+func (b *Local) localRun(ctx context.Context, op *backend.Operation) (*backend.LocalRun, *configload.Snapshot, statemgr.Full, tfdiags.Diagnostics) {
 	var diags tfdiags.Diagnostics
 
 	// Get the latest state.
@@ -74,6 +79,7 @@ func (b *Local) localRun(op *backend.Operation) (*backend.LocalRun, *configload.
 	}
 	coreOpts.UIInput = op.UIIn
 	coreOpts.Hooks = op.Hooks
+	coreOpts.Encryption = op.Encryption
 
 	var ctxDiags tfdiags.Diagnostics
 	var configSnap *configload.Snapshot
@@ -118,7 +124,7 @@ func (b *Local) localRun(op *backend.Operation) (*backend.LocalRun, *configload.
 			mode := tofu.InputModeProvider
 
 			log.Printf("[TRACE] backend/local: requesting interactive input, if necessary")
-			inputDiags := ret.Core.Input(ret.Config, mode)
+			inputDiags := ret.Core.Input(ctx, ret.Config, mode)
 			diags = diags.Append(inputDiags)
 			if inputDiags.HasErrors() {
 				return nil, nil, nil, diags
@@ -128,7 +134,7 @@ func (b *Local) localRun(op *backend.Operation) (*backend.LocalRun, *configload.
 		// If validation is enabled, validate
 		if b.OpValidation {
 			log.Printf("[TRACE] backend/local: running validation operation")
-			validateDiags := ret.Core.Validate(ret.Config)
+			validateDiags := ret.Core.Validate(ctx, ret.Config)
 			diags = diags.Append(validateDiags)
 		}
 	}
@@ -140,7 +146,7 @@ func (b *Local) localRunDirect(op *backend.Operation, run *backend.LocalRun, cor
 	var diags tfdiags.Diagnostics
 
 	// Load the configuration using the caller-provided configuration loader.
-	config, configSnap, configDiags := op.ConfigLoader.LoadConfigWithSnapshot(op.ConfigDir)
+	config, configSnap, configDiags := op.ConfigLoader.LoadConfigWithSnapshot(op.ConfigDir, op.RootCall)
 	diags = diags.Append(configDiags)
 	if configDiags.HasErrors() {
 		return nil, nil, diags
@@ -197,6 +203,7 @@ func (b *Local) localRunDirect(op *backend.Operation, run *backend.LocalRun, cor
 	planOpts := &tofu.PlanOpts{
 		Mode:               op.PlanMode,
 		Targets:            op.Targets,
+		Excludes:           op.Excludes,
 		ForceReplace:       op.ForceReplace,
 		SetVariables:       variables,
 		SkipRefresh:        op.Type != backend.OperationTypeRefresh && !op.PlanRefresh,
@@ -206,7 +213,16 @@ func (b *Local) localRunDirect(op *backend.Operation, run *backend.LocalRun, cor
 
 	// For a "direct" local run, the input state is the most recently stored
 	// snapshot, from the previous run.
-	run.InputState = s.State()
+	state := s.State()
+	if state != nil {
+		migratedState, migrateDiags := tofumigrate.MigrateStateProviderAddresses(config, state)
+		diags = diags.Append(migrateDiags)
+		if migrateDiags.HasErrors() {
+			return nil, nil, diags
+		}
+		state = migratedState
+	}
+	run.InputState = state
 
 	tfCtx, moreDiags := tofu.NewContext(coreOpts)
 	diags = diags.Append(moreDiags)
@@ -234,8 +250,49 @@ func (b *Local) localRunForPlanFile(op *backend.Operation, pf *planfile.Reader, 
 		))
 		return nil, snap, diags
 	}
+
+	plan, err := pf.ReadPlan()
+	if err != nil {
+		diags = diags.Append(tfdiags.Sourceless(
+			tfdiags.Error,
+			errSummary,
+			fmt.Sprintf("Failed to read plan from plan file: %s.", err),
+		))
+		return nil, snap, diags
+	}
+	// When we're applying a saved plan, we populate Plan instead of PlanOpts,
+	// because a plan object incorporates the subset of data from PlanOps that
+	// we need to apply the plan.
+	run.Plan = plan
+
+	subCall := op.RootCall.WithVariables(func(variable *configs.Variable) (cty.Value, hcl.Diagnostics) {
+		var diags hcl.Diagnostics
+
+		name := variable.Name
+		v, ok := plan.VariableValues[name]
+		if !ok {
+			if variable.Required() {
+				// This should not happen...
+				return cty.DynamicVal, diags.Append(&hcl.Diagnostic{
+					Severity: hcl.DiagError,
+					Summary:  "Missing plan variable " + variable.Name,
+				})
+			}
+			return variable.Default, nil
+		}
+
+		parsed, parsedErr := v.Decode(cty.DynamicPseudoType)
+		if parsedErr != nil {
+			diags = diags.Append(&hcl.Diagnostic{
+				Severity: hcl.DiagError,
+				Summary:  parsedErr.Error(),
+			})
+		}
+		return parsed, diags
+	})
+
 	loader := configload.NewLoaderFromSnapshot(snap)
-	config, configDiags := loader.LoadConfig(snap.Modules[""].Dir)
+	config, configDiags := loader.LoadConfig(snap.Modules[""].Dir, subCall)
 	diags = diags.Append(configDiags)
 	if configDiags.HasErrors() {
 		return nil, snap, diags
@@ -327,20 +384,6 @@ func (b *Local) localRunForPlanFile(op *backend.Operation, pf *planfile.Reader, 
 	// recorded in the plan, which incorporates the result of all of the
 	// refreshing we did while building the plan.
 	run.InputState = priorStateFile.State
-
-	plan, err := pf.ReadPlan()
-	if err != nil {
-		diags = diags.Append(tfdiags.Sourceless(
-			tfdiags.Error,
-			errSummary,
-			fmt.Sprintf("Failed to read plan from plan file: %s.", err),
-		))
-		return nil, snap, diags
-	}
-	// When we're applying a saved plan, we populate Plan instead of PlanOpts,
-	// because a plan object incorporates the subset of data from PlanOps that
-	// we need to apply the plan.
-	run.Plan = plan
 
 	tfCtx, moreDiags := tofu.NewContext(coreOpts)
 	diags = diags.Append(moreDiags)
