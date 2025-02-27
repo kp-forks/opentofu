@@ -1,4 +1,6 @@
-// Copyright (c) HashiCorp, Inc.
+// Copyright (c) The OpenTofu Authors
+// SPDX-License-Identifier: MPL-2.0
+// Copyright (c) 2023 HashiCorp, Inc.
 // SPDX-License-Identifier: MPL-2.0
 
 package command
@@ -30,8 +32,11 @@ const DefaultPluginVendorDir = "terraform.d/plugins/" + pluginMachineName
 // DefaultStateFilename is the default filename used for the state file.
 const DefaultStateFilename = "terraform.tfstate"
 
+// DefaultVarsExtension is the default file extension used for vars
+const DefaultVarsExtension = ".tfvars"
+
 // DefaultVarsFilename is the default filename used for vars
-const DefaultVarsFilename = "terraform.tfvars"
+const DefaultVarsFilename = "terraform" + DefaultVarsExtension
 
 // DefaultBackupExtension is added to the state file to form the path
 const DefaultBackupExtension = ".backup"
@@ -50,7 +55,7 @@ is configured to use a non-local backend. This backend doesn't support this
 operation.
 `
 
-// ModulePath returns the path to the root module and validates CLI arguments.
+// modulePath returns the path to the root module and validates CLI arguments.
 //
 // This centralizes the logic for any commands that previously accepted
 // a module path via CLI arguments. This will error if any extraneous arguments
@@ -58,7 +63,7 @@ operation.
 //
 // If your command accepts more than one arg, then change the slice bounds
 // to pass validation.
-func ModulePath(args []string) (string, error) {
+func modulePath(args []string) (string, error) {
 	// TODO: test
 
 	if len(args) > 0 {

@@ -1,3 +1,8 @@
+// Copyright (c) The OpenTofu Authors
+// SPDX-License-Identifier: MPL-2.0
+// Copyright (c) 2023 HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
 package command
 
 import (
@@ -22,6 +27,7 @@ import (
 	"github.com/opentofu/opentofu/internal/configs"
 	"github.com/opentofu/opentofu/internal/configs/configschema"
 	"github.com/opentofu/opentofu/internal/depsfile"
+	"github.com/opentofu/opentofu/internal/encryption"
 	"github.com/opentofu/opentofu/internal/getproviders"
 	"github.com/opentofu/opentofu/internal/providercache"
 	"github.com/opentofu/opentofu/internal/states"
@@ -465,7 +471,7 @@ func TestInit_backendConfigFilePowershellConfusion(t *testing.T) {
 	//
 	// Adding the "=" here forces this codepath to be checked, and it should
 	// result in an early exit with a diagnostic that the provided
-	// configuration file is not a diretory.
+	// configuration file is not a directory.
 	args := []string{"-backend-config=", "./input.config"}
 	if code := c.Run(args); code != 1 {
 		t.Fatalf("got exit status %d; want 1\nstderr:\n%s\n\nstdout:\n%s", code, ui.ErrorWriter.String(), ui.OutputWriter.String())
@@ -926,7 +932,7 @@ func TestInit_backendCloudInvalidOptions(t *testing.T) {
 	// just silently ignoring them, so that users will be aware that
 	// Cloud mode has more of an expected "happy path" than the
 	// less-vertically-integrated backends do, and to avoid these
-	// unapplicable options becoming compatibility constraints for
+	// inapplicable options becoming compatibility constraints for
 	// future evolution of Cloud mode.
 
 	// We use the same starting fixture for all of these tests, but some
@@ -994,7 +1000,7 @@ func TestInit_backendCloudInvalidOptions(t *testing.T) {
 Error: Invalid command-line option
 
 The -backend-config=... command line option is only for state backends, and
-is not applicable to Terraform Cloud-based configurations.
+is not applicable to cloud backend-based configurations.
 
 To change the set of workspaces associated with this configuration, edit the
 Cloud configuration block in the root module.
@@ -1033,9 +1039,9 @@ Cloud configuration block in the root module.
 Error: Invalid command-line option
 
 The -reconfigure option is for in-place reconfiguration of state backends
-only, and is not needed when changing Terraform Cloud settings.
+only, and is not needed when changing cloud backend settings.
 
-When using Terraform Cloud, initialization automatically activates any new
+When using cloud backend, initialization automatically activates any new
 Cloud configuration settings.
 
 `
@@ -1071,8 +1077,8 @@ Cloud configuration settings.
 		wantStderr := `
 Error: Invalid command-line option
 
-The -reconfigure option is unsupported when migrating to Terraform Cloud,
-because activating Terraform Cloud involves some additional steps.
+The -reconfigure option is unsupported when migrating to cloud backend,
+because activating cloud backend involves some additional steps.
 
 `
 		if diff := cmp.Diff(wantStderr, gotStderr); diff != "" {
@@ -1103,9 +1109,9 @@ because activating Terraform Cloud involves some additional steps.
 Error: Invalid command-line option
 
 The -migrate-state option is for migration between state backends only, and
-is not applicable when using Terraform Cloud.
+is not applicable when using cloud backend.
 
-State storage is handled automatically by Terraform Cloud and so the state
+State storage is handled automatically by cloud backend and so the state
 storage location is not configurable.
 
 `
@@ -1142,9 +1148,9 @@ storage location is not configurable.
 Error: Invalid command-line option
 
 The -migrate-state option is for migration between state backends only, and
-is not applicable when using Terraform Cloud.
+is not applicable when using cloud backend.
 
-Terraform Cloud migration has additional steps, configured by interactive
+Cloud backend migration has additional steps, configured by interactive
 prompts.
 
 `
@@ -1176,9 +1182,9 @@ prompts.
 Error: Invalid command-line option
 
 The -force-copy option is for migration between state backends only, and is
-not applicable when using Terraform Cloud.
+not applicable when using cloud backend.
 
-State storage is handled automatically by Terraform Cloud and so the state
+State storage is handled automatically by cloud backend and so the state
 storage location is not configurable.
 
 `
@@ -1215,9 +1221,9 @@ storage location is not configurable.
 Error: Invalid command-line option
 
 The -force-copy option is for migration between state backends only, and is
-not applicable when using Terraform Cloud.
+not applicable when using cloud backend.
 
-Terraform Cloud migration has additional steps, configured by interactive
+Cloud backend migration has additional steps, configured by interactive
 prompts.
 
 `
@@ -1257,7 +1263,7 @@ func TestInit_inputFalse(t *testing.T) {
 			false, // not sensitive
 		)
 	})
-	if err := statemgr.NewFilesystem("foo").WriteState(fooState); err != nil {
+	if err := statemgr.WriteAndPersist(statemgr.NewFilesystem("foo", encryption.StateEncryptionDisabled()), fooState, nil); err != nil {
 		t.Fatal(err)
 	}
 	barState := states.BuildState(func(s *states.SyncState) {
@@ -1267,7 +1273,7 @@ func TestInit_inputFalse(t *testing.T) {
 			false, // not sensitive
 		)
 	})
-	if err := statemgr.NewFilesystem("bar").WriteState(barState); err != nil {
+	if err := statemgr.WriteAndPersist(statemgr.NewFilesystem("bar", encryption.StateEncryptionDisabled()), barState, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1343,15 +1349,15 @@ func TestInit_getProvider(t *testing.T) {
 	}
 
 	// check that we got the providers for our config
-	exactPath := fmt.Sprintf(".terraform/providers/registry.terraform.io/hashicorp/exact/1.2.3/%s", getproviders.CurrentPlatform)
+	exactPath := fmt.Sprintf(".terraform/providers/registry.opentofu.org/hashicorp/exact/1.2.3/%s", getproviders.CurrentPlatform)
 	if _, err := os.Stat(exactPath); os.IsNotExist(err) {
 		t.Fatal("provider 'exact' not downloaded")
 	}
-	greaterThanPath := fmt.Sprintf(".terraform/providers/registry.terraform.io/hashicorp/greater-than/2.3.4/%s", getproviders.CurrentPlatform)
+	greaterThanPath := fmt.Sprintf(".terraform/providers/registry.opentofu.org/hashicorp/greater-than/2.3.4/%s", getproviders.CurrentPlatform)
 	if _, err := os.Stat(greaterThanPath); os.IsNotExist(err) {
 		t.Fatal("provider 'greater-than' not downloaded")
 	}
-	betweenPath := fmt.Sprintf(".terraform/providers/registry.terraform.io/hashicorp/between/2.3.4/%s", getproviders.CurrentPlatform)
+	betweenPath := fmt.Sprintf(".terraform/providers/registry.opentofu.org/hashicorp/between/2.3.4/%s", getproviders.CurrentPlatform)
 	if _, err := os.Stat(betweenPath); os.IsNotExist(err) {
 		t.Fatal("provider 'between' not downloaded")
 	}
@@ -1447,7 +1453,7 @@ func TestInit_getProviderSource(t *testing.T) {
 	}
 
 	// check that we got the providers for our config
-	exactPath := fmt.Sprintf(".terraform/providers/registry.terraform.io/acme/alpha/1.2.3/%s", getproviders.CurrentPlatform)
+	exactPath := fmt.Sprintf(".terraform/providers/registry.opentofu.org/acme/alpha/1.2.3/%s", getproviders.CurrentPlatform)
 	if _, err := os.Stat(exactPath); os.IsNotExist(err) {
 		t.Error("provider 'alpha' not downloaded")
 	}
@@ -1455,7 +1461,7 @@ func TestInit_getProviderSource(t *testing.T) {
 	if _, err := os.Stat(greaterThanPath); os.IsNotExist(err) {
 		t.Error("provider 'beta' not downloaded")
 	}
-	betweenPath := fmt.Sprintf(".terraform/providers/registry.terraform.io/hashicorp/gamma/2.0.0/%s", getproviders.CurrentPlatform)
+	betweenPath := fmt.Sprintf(".terraform/providers/registry.opentofu.org/hashicorp/gamma/2.0.0/%s", getproviders.CurrentPlatform)
 	if _, err := os.Stat(betweenPath); os.IsNotExist(err) {
 		t.Error("provider 'gamma' not downloaded")
 	}
@@ -1547,7 +1553,7 @@ func TestInit_getProviderInvalidPackage(t *testing.T) {
 	}
 
 	// invalid provider should be installed
-	packagePath := fmt.Sprintf(".terraform/providers/registry.terraform.io/invalid/package/1.0.0/%s/terraform-package", getproviders.CurrentPlatform)
+	packagePath := fmt.Sprintf(".terraform/providers/registry.opentofu.org/invalid/package/1.0.0/%s/terraform-package", getproviders.CurrentPlatform)
 	if _, err := os.Stat(packagePath); os.IsNotExist(err) {
 		t.Fatal("provider 'invalid/package' not downloaded")
 	}
@@ -1606,12 +1612,12 @@ func TestInit_getProviderDetectedLegacy(t *testing.T) {
 	}
 
 	// foo should be installed
-	fooPath := fmt.Sprintf(".terraform/providers/registry.terraform.io/hashicorp/foo/1.2.3/%s", getproviders.CurrentPlatform)
+	fooPath := fmt.Sprintf(".terraform/providers/registry.opentofu.org/hashicorp/foo/1.2.3/%s", getproviders.CurrentPlatform)
 	if _, err := os.Stat(fooPath); os.IsNotExist(err) {
 		t.Error("provider 'foo' not installed")
 	}
 	// baz should not be installed
-	bazPath := fmt.Sprintf(".terraform/providers/registry.terraform.io/terraform-providers/baz/2.3.4/%s", getproviders.CurrentPlatform)
+	bazPath := fmt.Sprintf(".terraform/providers/registry.opentofu.org/terraform-providers/baz/2.3.4/%s", getproviders.CurrentPlatform)
 	if _, err := os.Stat(bazPath); !os.IsNotExist(err) {
 		t.Error("provider 'baz' installed, but should not be")
 	}
@@ -1621,14 +1627,79 @@ func TestInit_getProviderDetectedLegacy(t *testing.T) {
 	errors := []string{
 		"Failed to query available provider packages",
 		"Could not retrieve the list of available versions",
-		"registry.terraform.io/hashicorp/baz",
-		"registry.terraform.io/hashicorp/frob",
+		"registry.opentofu.org/hashicorp/baz",
+		"registry.opentofu.org/hashicorp/frob",
 	}
 	for _, want := range errors {
 		if !strings.Contains(errOutput, want) {
 			t.Fatalf("expected error %q: %s", want, errOutput)
 		}
 	}
+}
+
+func TestInit_getProviderDetectedDuplicate(t *testing.T) {
+	// Create a temporary working directory that is empty
+	td := t.TempDir()
+	testCopyDir(t, testFixturePath("init-get-provider-detected-duplicate"), td)
+	defer testChdir(t, td)()
+
+	// We need to construct a multisource with a mock source and a registry
+	// source: the mock source will return ErrRegistryProviderNotKnown for an
+	// unknown provider, and the registry source will allow us to look up the
+	// appropriate namespace if possible.
+	providerSource, psClose := newMockProviderSource(t, map[string][]string{
+		"hashicorp/foo": {"1.2.3"},
+		"opentofu/foo":  {"1.2.3"},
+		"hashicorp/bar": {"1.2.3"},
+	})
+	defer psClose()
+	registrySource, rsClose := testRegistrySource(t)
+	defer rsClose()
+	multiSource := getproviders.MultiSource{
+		{Source: providerSource},
+		{Source: registrySource},
+	}
+
+	ui := new(cli.MockUi)
+	view, _ := testView(t)
+	m := Meta{
+		Ui:             ui,
+		View:           view,
+		ProviderSource: multiSource,
+	}
+
+	c := &InitCommand{
+		Meta: m,
+	}
+
+	args := []string{
+		"-backend=false", // should be possible to install plugins without backend init
+	}
+	if code := c.Run(args); code != 0 {
+		t.Fatalf("expected error, got output: \n%s\n%s", ui.OutputWriter.String(), ui.ErrorWriter.String())
+	}
+
+	// error output is the main focus of this test
+	errOutput := ui.ErrorWriter.String()
+	errors := []string{
+		"Warning: Potential provider misconfiguration",
+		"OpenTofu has detected multiple providers of type foo",
+		"If this is intentional you can ignore this warning",
+	}
+	unexpected := []string{
+		"OpenTofu has detected multiple providers of type bar",
+	}
+	for _, want := range errors {
+		if !strings.Contains(errOutput, want) {
+			t.Fatalf("expected error %q: %s", want, errOutput)
+		}
+	}
+	for _, unwanted := range unexpected {
+		if strings.Contains(errOutput, unwanted) {
+			t.Fatalf("unexpected error %q: %s", unwanted, errOutput)
+		}
+	}
+
 }
 
 func TestInit_providerSource(t *testing.T) {
@@ -1706,7 +1777,7 @@ func TestInit_providerSource(t *testing.T) {
 			getproviders.MustParseVersion("1.2.4"),
 			getproviders.MustParseVersionConstraints("= 1.2.4"),
 			[]getproviders.Hash{
-				getproviders.HashScheme1.New("see6W06w09Ea+AobFJ+mbvPTie6ASqZAAdlFZbs8BSM="),
+				getproviders.HashScheme1.New("vEthLkqAecdQimaW6JHZ0SBRNtHibLnOb31tX9ZXlcI="),
 			},
 		),
 		addrs.NewDefaultProvider("test"): depsfile.NewProviderLock(
@@ -1714,7 +1785,7 @@ func TestInit_providerSource(t *testing.T) {
 			getproviders.MustParseVersion("1.2.3"),
 			getproviders.MustParseVersionConstraints("= 1.2.3"),
 			[]getproviders.Hash{
-				getproviders.HashScheme1.New("wlbEC2mChQZ2hhgUhl6SeVLPP7fMqOFUZAQhQ9GIIno="),
+				getproviders.HashScheme1.New("8CjxaUBuegKZSFnRos39Fs+CS78ax0Dyb7aIA5XBiNI="),
 			},
 		),
 		addrs.NewDefaultProvider("source"): depsfile.NewProviderLock(
@@ -1722,7 +1793,7 @@ func TestInit_providerSource(t *testing.T) {
 			getproviders.MustParseVersion("1.2.3"),
 			getproviders.MustParseVersionConstraints("= 1.2.3"),
 			[]getproviders.Hash{
-				getproviders.HashScheme1.New("myS3qb3px3tRBq1ZWRYJeUH+kySWpBc0Yy8rw6W7/p4="),
+				getproviders.HashScheme1.New("ACYytVQ2Q6JfoEs7xxCqa1yGFf9HwF3SEHzJKBoJfo0="),
 			},
 		),
 	}
@@ -1922,7 +1993,7 @@ func TestInit_getUpgradePlugins(t *testing.T) {
 			getproviders.MustParseVersion("2.3.4"),
 			getproviders.MustParseVersionConstraints("> 1.0.0, < 3.0.0"),
 			[]getproviders.Hash{
-				getproviders.HashScheme1.New("JVqAvZz88A+hS2wHVtTWQkHaxoA/LrUAz0H3jPBWPIA="),
+				getproviders.HashScheme1.New("ntfa04OlRqIfGL/Gkd+nGMJSHGWyAgMQplFWk7WEsOk="),
 			},
 		),
 		addrs.NewDefaultProvider("exact"): depsfile.NewProviderLock(
@@ -1930,7 +2001,7 @@ func TestInit_getUpgradePlugins(t *testing.T) {
 			getproviders.MustParseVersion("1.2.3"),
 			getproviders.MustParseVersionConstraints("= 1.2.3"),
 			[]getproviders.Hash{
-				getproviders.HashScheme1.New("H1TxWF8LyhBb6B4iUdKhLc/S9sC/jdcrCykpkbGcfbg="),
+				getproviders.HashScheme1.New("Xgk+LFrzi9Mop6+d01TCTaD3kgSrUASCAUU1aDsEsJU="),
 			},
 		),
 		addrs.NewDefaultProvider("greater-than"): depsfile.NewProviderLock(
@@ -1938,7 +2009,7 @@ func TestInit_getUpgradePlugins(t *testing.T) {
 			getproviders.MustParseVersion("2.3.4"),
 			getproviders.MustParseVersionConstraints(">= 2.3.3"),
 			[]getproviders.Hash{
-				getproviders.HashScheme1.New("SJPpXx/yoFE/W+7eCipjJ+G21xbdnTBD7lWodZ8hWkU="),
+				getproviders.HashScheme1.New("8M5DXICmUiVjbkxNNO0zXNsV6duCVNWzq3/Kf0mNIo4="),
 			},
 		),
 	}
@@ -2111,11 +2182,11 @@ func TestInit_providerLockFile(t *testing.T) {
 # This file is maintained automatically by "tofu init".
 # Manual edits may be lost in future updates.
 
-provider "registry.terraform.io/hashicorp/test" {
+provider "registry.opentofu.org/hashicorp/test" {
   version     = "1.2.3"
   constraints = "1.2.3"
   hashes = [
-    "h1:wlbEC2mChQZ2hhgUhl6SeVLPP7fMqOFUZAQhQ9GIIno=",
+    "h1:8CjxaUBuegKZSFnRos39Fs+CS78ax0Dyb7aIA5XBiNI=",
   ]
 }
 `)
@@ -2138,11 +2209,11 @@ func TestInit_providerLockFileReadonly(t *testing.T) {
 # This file is maintained automatically by "tofu init".
 # Manual edits may be lost in future updates.
 
-provider "registry.terraform.io/hashicorp/test" {
+provider "registry.opentofu.org/hashicorp/test" {
   version     = "1.2.3"
   constraints = "1.2.3"
   hashes = [
-    "zh:e919b507a91e23a00da5c2c4d0b64bcc7900b68d43b3951ac0f6e5d80387fbdc",
+    "zh:6f85a1f747dd09455cd77683c0e06da647d8240461b8b36b304b9056814d91f2",
   ]
 }
 `)
@@ -2151,7 +2222,7 @@ provider "registry.terraform.io/hashicorp/test" {
 # This file is maintained automatically by "tofu init".
 # Manual edits may be lost in future updates.
 
-provider "registry.terraform.io/hashicorp/test" {
+provider "registry.opentofu.org/hashicorp/test" {
   version     = "1.2.3"
   constraints = "1.2.3"
   hashes = [
@@ -2164,12 +2235,12 @@ provider "registry.terraform.io/hashicorp/test" {
 # This file is maintained automatically by "tofu init".
 # Manual edits may be lost in future updates.
 
-provider "registry.terraform.io/hashicorp/test" {
+provider "registry.opentofu.org/hashicorp/test" {
   version     = "1.2.3"
   constraints = "1.2.3"
   hashes = [
-    "h1:wlbEC2mChQZ2hhgUhl6SeVLPP7fMqOFUZAQhQ9GIIno=",
-    "zh:e919b507a91e23a00da5c2c4d0b64bcc7900b68d43b3951ac0f6e5d80387fbdc",
+    "h1:8CjxaUBuegKZSFnRos39Fs+CS78ax0Dyb7aIA5XBiNI=",
+    "zh:6f85a1f747dd09455cd77683c0e06da647d8240461b8b36b304b9056814d91f2",
   ]
 }
 `)
@@ -2243,7 +2314,7 @@ provider "registry.terraform.io/hashicorp/test" {
 			want:      badLockFile,
 		},
 		{
-			desc:    "reject to change required provider dependences",
+			desc:    "reject to change required provider dependencies",
 			fixture: "init-provider-lock-file-readonly-add",
 			providers: map[string][]string{
 				"test": {"1.2.3"},
@@ -2277,7 +2348,7 @@ provider "registry.terraform.io/hashicorp/test" {
 				Meta: m,
 			}
 
-			// write input lockfile
+			//write input lockfile
 			lockFile := ".terraform.lock.hcl"
 			if err := os.WriteFile(lockFile, []byte(tc.input), 0644); err != nil {
 				t.Fatalf("failed to write input lockfile: %s", err)
@@ -2438,7 +2509,7 @@ func TestInit_pluginDirProviders(t *testing.T) {
 			getproviders.MustParseVersion("2.3.4"),
 			getproviders.MustParseVersionConstraints("> 1.0.0, < 3.0.0"),
 			[]getproviders.Hash{
-				getproviders.HashScheme1.New("JVqAvZz88A+hS2wHVtTWQkHaxoA/LrUAz0H3jPBWPIA="),
+				getproviders.HashScheme1.New("ntfa04OlRqIfGL/Gkd+nGMJSHGWyAgMQplFWk7WEsOk="),
 			},
 		),
 		addrs.NewDefaultProvider("exact"): depsfile.NewProviderLock(
@@ -2446,7 +2517,7 @@ func TestInit_pluginDirProviders(t *testing.T) {
 			getproviders.MustParseVersion("1.2.3"),
 			getproviders.MustParseVersionConstraints("= 1.2.3"),
 			[]getproviders.Hash{
-				getproviders.HashScheme1.New("H1TxWF8LyhBb6B4iUdKhLc/S9sC/jdcrCykpkbGcfbg="),
+				getproviders.HashScheme1.New("Xgk+LFrzi9Mop6+d01TCTaD3kgSrUASCAUU1aDsEsJU="),
 			},
 		),
 		addrs.NewDefaultProvider("greater-than"): depsfile.NewProviderLock(
@@ -2454,7 +2525,7 @@ func TestInit_pluginDirProviders(t *testing.T) {
 			getproviders.MustParseVersion("2.3.4"),
 			getproviders.MustParseVersionConstraints(">= 2.3.3"),
 			[]getproviders.Hash{
-				getproviders.HashScheme1.New("SJPpXx/yoFE/W+7eCipjJ+G21xbdnTBD7lWodZ8hWkU="),
+				getproviders.HashScheme1.New("8M5DXICmUiVjbkxNNO0zXNsV6duCVNWzq3/Kf0mNIo4="),
 			},
 		),
 	}
@@ -2641,7 +2712,7 @@ func TestInit_invalidSyntaxNoBackend(t *testing.T) {
 	}
 
 	errStr := ui.ErrorWriter.String()
-	if subStr := "OpenTofu encountered problems during initialisation, including problems\nwith the configuration, described below."; !strings.Contains(errStr, subStr) {
+	if subStr := "OpenTofu encountered problems during initialization, including problems\nwith the configuration, described below."; !strings.Contains(errStr, subStr) {
 		t.Errorf("Error output should include preamble\nwant substr: %s\ngot:\n%s", subStr, errStr)
 	}
 	if subStr := "Error: Unsupported block type"; !strings.Contains(errStr, subStr) {
@@ -2670,7 +2741,7 @@ func TestInit_invalidSyntaxWithBackend(t *testing.T) {
 	}
 
 	errStr := ui.ErrorWriter.String()
-	if subStr := "OpenTofu encountered problems during initialisation, including problems\nwith the configuration, described below."; !strings.Contains(errStr, subStr) {
+	if subStr := "OpenTofu encountered problems during initialization, including problems\nwith the configuration, described below."; !strings.Contains(errStr, subStr) {
 		t.Errorf("Error output should include preamble\nwant substr: %s\ngot:\n%s", subStr, errStr)
 	}
 	if subStr := "Error: Unsupported block type"; !strings.Contains(errStr, subStr) {
@@ -2699,7 +2770,7 @@ func TestInit_invalidSyntaxInvalidBackend(t *testing.T) {
 	}
 
 	errStr := ui.ErrorWriter.String()
-	if subStr := "OpenTofu encountered problems during initialisation, including problems\nwith the configuration, described below."; !strings.Contains(errStr, subStr) {
+	if subStr := "OpenTofu encountered problems during initialization, including problems\nwith the configuration, described below."; !strings.Contains(errStr, subStr) {
 		t.Errorf("Error output should include preamble\nwant substr: %s\ngot:\n%s", subStr, errStr)
 	}
 	if subStr := "Error: Unsupported block type"; !strings.Contains(errStr, subStr) {
@@ -2731,7 +2802,7 @@ func TestInit_invalidSyntaxBackendAttribute(t *testing.T) {
 	}
 
 	errStr := ui.ErrorWriter.String()
-	if subStr := "OpenTofu encountered problems during initialisation, including problems\nwith the configuration, described below."; !strings.Contains(errStr, subStr) {
+	if subStr := "OpenTofu encountered problems during initialization, including problems\nwith the configuration, described below."; !strings.Contains(errStr, subStr) {
 		t.Errorf("Error output should include preamble\nwant substr: %s\ngot:\n%s", subStr, errStr)
 	}
 	if subStr := "Error: Invalid character"; !strings.Contains(errStr, subStr) {
@@ -2803,11 +2874,10 @@ func TestInit_testsWithProvider(t *testing.T) {
 
 	got := ui.ErrorWriter.String()
 	want := `
-Error: Failed to query available provider packages
+Error: Failed to resolve provider packages
 
-Could not retrieve the list of available versions for provider
-hashicorp/test: no available releases match the given constraints 1.0.1,
-1.0.2
+Could not resolve provider hashicorp/test: no available releases match the
+given constraints 1.0.1, 1.0.2
 
 `
 	if diff := cmp.Diff(got, want); len(diff) > 0 {
@@ -2851,6 +2921,219 @@ func TestInit_testsWithModule(t *testing.T) {
 	}
 }
 
+// Test variables are handled correctly when interacting with module sources
+func TestInit_moduleSource(t *testing.T) {
+	t.Run("missing", func(t *testing.T) {
+		td := t.TempDir()
+		testCopyDir(t, testFixturePath("init-module-variable-source"), td)
+		defer testChdir(t, td)()
+
+		ui := cli.NewMockUi()
+		view, _ := testView(t)
+		closeInput := testInteractiveInput(t, []string{"./mod"})
+		defer closeInput()
+		c := &InitCommand{
+			Meta: Meta{
+				Ui:   ui,
+				View: view,
+			},
+		}
+
+		if code := c.Run(nil); code != 0 {
+			t.Fatalf("got exit status %d; want 0\nstderr:\n%s\n\nstdout:\n%s", code, ui.ErrorWriter.String(), ui.OutputWriter.String())
+		}
+	})
+
+	t.Run("missing-twice", func(t *testing.T) {
+		td := t.TempDir()
+		testCopyDir(t, testFixturePath("init-module-variable-source-multiple"), td)
+		defer testChdir(t, td)()
+
+		ui := cli.NewMockUi()
+		view, _ := testView(t)
+		closeInput := testInteractiveInput(t, []string{"./mod"})
+		defer closeInput()
+		c := &InitCommand{
+			Meta: Meta{
+				Ui:   ui,
+				View: view,
+			},
+		}
+
+		if code := c.Run(nil); code != 0 {
+			t.Fatalf("got exit status %d; want 0\nstderr:\n%s\n\nstdout:\n%s", code, ui.ErrorWriter.String(), ui.OutputWriter.String())
+		}
+	})
+
+	t.Run("no-input", func(t *testing.T) {
+		td := t.TempDir()
+		testCopyDir(t, testFixturePath("init-module-variable-source"), td)
+		defer testChdir(t, td)()
+
+		ui := cli.NewMockUi()
+		view, _ := testView(t)
+		closeInput := testInteractiveInput(t, []string{})
+		defer closeInput()
+		c := &InitCommand{
+			Meta: Meta{
+				Ui:   ui,
+				View: view,
+			},
+		}
+
+		args := []string{
+			"-input=false",
+		}
+
+		if code := c.Run(args); code != 1 {
+			t.Fatalf("got exit status %d; want 1\nstderr:\n%s\n\nstdout:\n%s", code, ui.ErrorWriter.String(), ui.OutputWriter.String())
+		}
+	})
+
+	t.Run("provided", func(t *testing.T) {
+		td := t.TempDir()
+		testCopyDir(t, testFixturePath("init-module-variable-source"), td)
+		defer testChdir(t, td)()
+
+		ui := cli.NewMockUi()
+		view, _ := testView(t)
+		c := &InitCommand{
+			Meta: Meta{
+				Ui:   ui,
+				View: view,
+			},
+		}
+
+		args := []string{"-var", "src=./mod"}
+		if code := c.Run(args); code != 0 {
+			t.Fatalf("got exit status %d; want 1\nstderr:\n%s\n\nstdout:\n%s", code, ui.ErrorWriter.String(), ui.OutputWriter.String())
+		}
+	})
+}
+
+// Test variables are handled correctly when interacting with module versions
+func TestInit_moduleVersion(t *testing.T) {
+	if os.Getenv("TF_ACC") == "" {
+		t.Skip("network access not allowed; use TF_ACC=1 to enable")
+	}
+
+	t.Run("provided", func(t *testing.T) {
+		td := t.TempDir()
+		testCopyDir(t, testFixturePath("init-module-variable-version"), td)
+		defer testChdir(t, td)()
+
+		ui := cli.NewMockUi()
+		view, _ := testView(t)
+		c := &InitCommand{
+			Meta: Meta{
+				Ui:   ui,
+				View: view,
+			},
+		}
+
+		args := []string{"-var", "modver=0.0.1"}
+		if code := c.Run(args); code != 0 {
+			t.Fatalf("got exit status %d; want 1\nstderr:\n%s\n\nstdout:\n%s", code, ui.ErrorWriter.String(), ui.OutputWriter.String())
+		}
+	})
+}
+
+func TestInit_invalidExtraLabel(t *testing.T) {
+	td := t.TempDir()
+	testCopyDir(t, testFixturePath("init-syntax-invalid-extra-label"), td)
+	defer testChdir(t, td)()
+
+	ui := cli.NewMockUi()
+	view, _ := testView(t)
+	m := Meta{
+		Ui:   ui,
+		View: view,
+	}
+
+	c := &InitCommand{
+		Meta: m,
+	}
+
+	if code := c.Run(nil); code == 0 {
+		t.Fatalf("succeeded, but was expecting error\nstdout:\n%s\nstderr:\n%s", ui.OutputWriter, ui.ErrorWriter)
+	}
+
+	errStr := ui.ErrorWriter.String()
+	splitted := strings.Split(errStr, "Error: Unsupported block type")
+	if len(splitted) != 2 {
+		t.Fatalf("want exactly one unsupported block type errors but got: %d\nstderr:\n%s\n\nstdout:\n%s", len(splitted)-1, errStr, ui.OutputWriter.String())
+	}
+}
+
+func TestInit_skipEncryptionBackendFalse(t *testing.T) {
+	t.Run("init success with encryption present and -backend=false", func(t *testing.T) {
+		// Create a temporary working directory that is empty
+		td := t.TempDir()
+		testCopyDir(t, testFixturePath("init-encryption-available"), td)
+		defer testChdir(t, td)()
+
+		overrides := metaOverridesForProvider(testProvider())
+		ui := new(cli.MockUi)
+		view, _ := testView(t)
+		providerSource, closeCallback := newMockProviderSource(t, map[string][]string{
+			// mock aws provider
+			"hashicorp/aws": {"5.0", "5.8"},
+		})
+		defer closeCallback()
+		m := Meta{
+			testingOverrides: overrides,
+			Ui:               ui,
+			View:             view,
+			ProviderSource:   providerSource,
+		}
+
+		c := &InitCommand{
+			Meta: m,
+		}
+
+		args := []string{
+			"-backend=false", // should disable reading encryption key run init successfully
+		}
+		if code := c.Run(args); code != 0 {
+			t.Fatalf("init should run successfully with -backend=false: \ngot error : %s\n", ui.ErrorWriter.String())
+		}
+	})
+
+	t.Run("init fails with encryption present -backend=false not set", func(t *testing.T) {
+		// Create a temporary working directory that is empty
+		td := t.TempDir()
+		testCopyDir(t, testFixturePath("init-encryption-available"), td)
+		defer testChdir(t, td)()
+
+		overrides := metaOverridesForProvider(testProvider())
+		ui := new(cli.MockUi)
+		view, _ := testView(t)
+		providerSource, closeCallback := newMockProviderSource(t, map[string][]string{
+			// mock aws provider
+			"hashicorp/aws": {"5.0", "5.8"},
+		})
+		defer closeCallback()
+		m := Meta{
+			testingOverrides: overrides,
+			Ui:               ui,
+			View:             view,
+			ProviderSource:   providerSource,
+		}
+
+		c := &InitCommand{
+			Meta: m,
+		}
+
+		var args []string
+		// Check error is generated from trying to read encryption key or fail test
+		if code := c.Run(args); code == 0 {
+			t.Fatalf("init should not run successfully\n")
+		} else if !strings.Contains(ui.ErrorWriter.String(), "key_provider.aws_kms.key failed with error:") {
+			t.Fatalf("generated error should contain the string \"Error: Unable to fetch encryption key data\"\ninstead got : %s\n", ui.ErrorWriter.String())
+		}
+	})
+}
+
 // newMockProviderSource is a helper to succinctly construct a mock provider
 // source that contains a set of packages matching the given provider versions
 // that are available for installation (from temporary local files).
@@ -2861,7 +3144,7 @@ func TestInit_testsWithModule(t *testing.T) {
 //
 // Provider addresses must be valid source strings, and passing only the
 // provider name will be interpreted as a "default" provider under
-// registry.terraform.io/hashicorp. If you need more control over the
+// registry.opentofu.org/hashicorp. If you need more control over the
 // provider addresses, pass a full provider source string.
 //
 // This function also registers providers as belonging to the current platform,
@@ -2980,13 +3263,13 @@ func expectedPackageInstallPath(name, version string, exe bool) string {
 	platform := getproviders.CurrentPlatform
 	baseDir := ".terraform/providers"
 	if exe {
-		p := fmt.Sprintf("registry.terraform.io/hashicorp/%s/%s/%s/terraform-provider-%s_%s", name, version, platform, name, version)
+		p := fmt.Sprintf("registry.opentofu.org/hashicorp/%s/%s/%s/terraform-provider-%s_%s", name, version, platform, name, version)
 		if platform.OS == "windows" {
 			p += ".exe"
 		}
 		return filepath.ToSlash(filepath.Join(baseDir, p))
 	}
 	return filepath.ToSlash(filepath.Join(
-		baseDir, fmt.Sprintf("registry.terraform.io/hashicorp/%s/%s/%s", name, version, platform),
+		baseDir, fmt.Sprintf("registry.opentofu.org/hashicorp/%s/%s/%s", name, version, platform),
 	))
 }

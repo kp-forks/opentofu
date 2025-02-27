@@ -1,4 +1,6 @@
-// Copyright (c) HashiCorp, Inc.
+// Copyright (c) The OpenTofu Authors
+// SPDX-License-Identifier: MPL-2.0
+// Copyright (c) 2023 HashiCorp, Inc.
 // SPDX-License-Identifier: MPL-2.0
 
 package oss
@@ -441,6 +443,10 @@ func (c *RemoteClient) getObj() (*remote.Payload, error) {
 	}
 
 	return payload, nil
+}
+
+func (c *RemoteClient) IsLockingEnabled() bool {
+	return c.otsTable != ""
 }
 
 const errBadChecksumFmt = `state data in OSS does not have the expected content.

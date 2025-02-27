@@ -1,4 +1,6 @@
-// Copyright (c) HashiCorp, Inc.
+// Copyright (c) The OpenTofu Authors
+// SPDX-License-Identifier: MPL-2.0
+// Copyright (c) 2023 HashiCorp, Inc.
 // SPDX-License-Identifier: MPL-2.0
 
 package regsrc
@@ -19,18 +21,18 @@ func TestFriendlyHost(t *testing.T) {
 	}{
 		{
 			name:        "simple ascii",
-			source:      "registry.terraform.io",
-			wantHost:    "registry.terraform.io",
-			wantDisplay: "registry.terraform.io",
-			wantNorm:    "registry.terraform.io",
+			source:      "registry.opentofu.org",
+			wantHost:    "registry.opentofu.org",
+			wantDisplay: "registry.opentofu.org",
+			wantNorm:    "registry.opentofu.org",
 			wantValid:   true,
 		},
 		{
 			name:        "mixed-case ascii",
-			source:      "Registry.TerraForm.io",
-			wantHost:    "Registry.TerraForm.io",
-			wantDisplay: "registry.terraform.io", // Display case folded
-			wantNorm:    "registry.terraform.io",
+			source:      "Registry.OpenTofu.org",
+			wantHost:    "Registry.OpenTofu.org",
+			wantDisplay: "registry.opentofu.org", // Display case folded
+			wantNorm:    "registry.opentofu.org",
 			wantValid:   true,
 		},
 		{

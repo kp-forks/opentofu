@@ -21,14 +21,15 @@
                     "mode": "managed",
                     "type": "test_instance",
                     "name": "test",
-                    "provider_name": "registry.terraform.io/hashicorp/test",
+                    "provider_name": "registry.opentofu.org/hashicorp/test",
                     "schema_version": 0,
                     "values": {
                         "ami": "bar",
                         "password": "secret"
                     },
                     "sensitive_values": {
-                        "ami": true
+                        "ami": true,
+                        "password": true
                     }
                 },
                 {
@@ -37,14 +38,15 @@
                     "mode": "managed",
                     "type": "test_instance",
                     "name": "test",
-                    "provider_name": "registry.terraform.io/hashicorp/test",
+                    "provider_name": "registry.opentofu.org/hashicorp/test",
                     "schema_version": 0,
                     "values": {
                         "ami": "bar",
                         "password": "secret"
                     },
                     "sensitive_values": {
-                        "ami": true
+                        "ami": true,
+                        "password": true
                     }
                 },
                 {
@@ -53,14 +55,15 @@
                     "mode": "managed",
                     "type": "test_instance",
                     "name": "test",
-                    "provider_name": "registry.terraform.io/hashicorp/test",
+                    "provider_name": "registry.opentofu.org/hashicorp/test",
                     "schema_version": 0,
                     "values": {
                         "ami": "bar",
                         "password": "secret"
                     },
                     "sensitive_values": {
-                        "ami": true
+                        "ami": true,
+                        "password": true
                     }
                 }
             ]
@@ -85,7 +88,7 @@
             "index": 0,
             "mode": "managed",
             "type": "test_instance",
-            "provider_name": "registry.terraform.io/hashicorp/test",
+            "provider_name": "registry.opentofu.org/hashicorp/test",
             "name": "test",
             "change": {
                 "actions": [
@@ -108,7 +111,7 @@
             "index": 1,
             "mode": "managed",
             "type": "test_instance",
-            "provider_name": "registry.terraform.io/hashicorp/test",
+            "provider_name": "registry.opentofu.org/hashicorp/test",
             "name": "test",
             "change": {
                 "actions": [
@@ -131,7 +134,7 @@
             "index": 2,
             "mode": "managed",
             "type": "test_instance",
-            "provider_name": "registry.terraform.io/hashicorp/test",
+            "provider_name": "registry.opentofu.org/hashicorp/test",
             "name": "test",
             "change": {
                 "actions": [
@@ -166,7 +169,7 @@
         "provider_config": {
             "test": {
                 "name": "test",
-                "full_name": "registry.terraform.io/hashicorp/test",
+                "full_name": "registry.opentofu.org/hashicorp/test",
                 "expressions": {
                     "region": {
                         "constant_value": "somewhere"

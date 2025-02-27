@@ -1,4 +1,6 @@
-// Copyright (c) HashiCorp, Inc.
+// Copyright (c) The OpenTofu Authors
+// SPDX-License-Identifier: MPL-2.0
+// Copyright (c) 2023 HashiCorp, Inc.
 // SPDX-License-Identifier: MPL-2.0
 
 package providercache
@@ -656,7 +658,7 @@ func TestEnsureProviderVersions(t *testing.T) {
 			LockFile: `
 				# This is approximating the awkward situation where the lock
 				# file was populated by someone who installed from a location
-				# other than the origin registry annd so the set of checksums
+				# other than the origin registry and so the set of checksums
 				# is incomplete. In this case we can't prove that our cache
 				# entry is valid and so we silently ignore the cache entry
 				# and try to install from upstream anyway, in the hope that
@@ -2018,7 +2020,7 @@ func TestEnsureProviderVersions(t *testing.T) {
 				beepProvider: getproviders.MustParseVersionConstraints(">= 1.0.0"),
 			},
 			WantErr: `some providers could not be installed:
-- example.com/foo/beep: the local package for example.com/foo/beep 1.0.0 doesn't match any of the checksums previously recorded in the dependency lock file (this might be because the available checksums are for packages targeting different platforms); for more information: https://www.placeholderplaceholderplaceholder.io/language/provider-checksum-verification`,
+- example.com/foo/beep: the local package for example.com/foo/beep 1.0.0 doesn't match any of the checksums previously recorded in the dependency lock file (this might be because the available checksums are for packages targeting different platforms); for more information: https://opentofu.org/docs/language/files/dependency-lock/#checksum-verification`,
 			WantEvents: func(inst *Installer, dir *Dir) map[addrs.Provider][]*testInstallerEventLogItem {
 				return map[addrs.Provider][]*testInstallerEventLogItem{
 					noProvider: {
@@ -2064,7 +2066,7 @@ func TestEnsureProviderVersions(t *testing.T) {
 								Error   string
 							}{
 								"1.0.0",
-								`the local package for example.com/foo/beep 1.0.0 doesn't match any of the checksums previously recorded in the dependency lock file (this might be because the available checksums are for packages targeting different platforms); for more information: https://www.placeholderplaceholderplaceholder.io/language/provider-checksum-verification`,
+								`the local package for example.com/foo/beep 1.0.0 doesn't match any of the checksums previously recorded in the dependency lock file (this might be because the available checksums are for packages targeting different platforms); for more information: https://opentofu.org/docs/language/files/dependency-lock/#checksum-verification`,
 							},
 						},
 					},
@@ -2313,6 +2315,12 @@ func TestEnsureProviderVersions_local_source(t *testing.T) {
 			wantHash: getproviders.NilHash, // installation fails for a provider with no executable
 			err:      "provider binary not found: could not find executable file starting with terraform-provider-executable",
 		},
+		"unspecified-version": {
+			provider: "null",
+			version:  "0.0.0",
+			wantHash: getproviders.NilHash,
+			err:      "0.0.0 is not a valid provider version. \nIf the version 0.0.0 is intended to represent a non-published provider, consider using dev_overrides - https://opentofu.org/docs/cli/config/config-file/#development-overrides-for-provider-developers",
+		},
 	}
 
 	for name, test := range tests {
@@ -2471,12 +2479,12 @@ func testServices(t *testing.T) (services *disco.Disco, baseURL string, cleanup 
 		"providers.v1": server.URL + "/fails-immediately/",
 	})
 
-	// We'll also permit registry.terraform.io here just because it's our
+	// We'll also permit registry.opentofu.org here just because it's our
 	// default and has some unique features that are not allowed on any other
 	// hostname. It behaves the same as example.com, which should be preferred
 	// if you're not testing something specific to the default registry in order
 	// to ensure that most things are hostname-agnostic.
-	services.ForceHostServices(svchost.Hostname("registry.terraform.io"), map[string]interface{}{
+	services.ForceHostServices(svchost.Hostname("registry.opentofu.org"), map[string]interface{}{
 		"providers.v1": server.URL + "/providers/v1/",
 	})
 
@@ -2553,7 +2561,7 @@ func fakeRegistryHandler(resp http.ResponseWriter, req *http.Request) {
 
 		case "-/legacy":
 			// NOTE: This legacy lookup endpoint is specific to
-			// registry.terraform.io and not expected to work on any other
+			// registry.opentofu.org and not expected to work on any other
 			// registry host.
 			resp.Header().Set("Content-Type", "application/json")
 			resp.WriteHeader(200)

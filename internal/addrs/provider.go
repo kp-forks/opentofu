@@ -1,13 +1,15 @@
-// Copyright (c) HashiCorp, Inc.
+// Copyright (c) The OpenTofu Authors
+// SPDX-License-Identifier: MPL-2.0
+// Copyright (c) 2023 HashiCorp, Inc.
 // SPDX-License-Identifier: MPL-2.0
 
 package addrs
 
 import (
 	"github.com/hashicorp/hcl/v2"
-	tfaddr "github.com/hashicorp/terraform-registry-address"
 	svchost "github.com/hashicorp/terraform-svchost"
 	"github.com/opentofu/opentofu/internal/tfdiags"
+	tfaddr "github.com/opentofu/registry-address"
 )
 
 // Provider encapsulates a single provider type. In the future this will be

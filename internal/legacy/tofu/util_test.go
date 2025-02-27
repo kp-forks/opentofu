@@ -1,4 +1,6 @@
-// Copyright (c) HashiCorp, Inc.
+// Copyright (c) The OpenTofu Authors
+// SPDX-License-Identifier: MPL-2.0
+// Copyright (c) 2023 HashiCorp, Inc.
 // SPDX-License-Identifier: MPL-2.0
 
 package tofu
@@ -35,21 +37,6 @@ func TestSemaphore(t *testing.T) {
 		}
 	}()
 	s.Release()
-}
-
-func TestStrSliceContains(t *testing.T) {
-	if strSliceContains(nil, "foo") {
-		t.Fatalf("Bad")
-	}
-	if strSliceContains([]string{}, "foo") {
-		t.Fatalf("Bad")
-	}
-	if strSliceContains([]string{"bar"}, "foo") {
-		t.Fatalf("Bad")
-	}
-	if !strSliceContains([]string{"bar", "foo"}, "foo") {
-		t.Fatalf("Bad")
-	}
 }
 
 func TestUniqueStrings(t *testing.T) {

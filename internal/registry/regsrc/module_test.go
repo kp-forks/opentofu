@@ -1,4 +1,6 @@
-// Copyright (c) HashiCorp, Inc.
+// Copyright (c) The OpenTofu Authors
+// SPDX-License-Identifier: MPL-2.0
+// Copyright (c) 2023 HashiCorp, Inc.
 // SPDX-License-Identifier: MPL-2.0
 
 package regsrc
@@ -34,8 +36,8 @@ func TestModule(t *testing.T) {
 		},
 		{
 			name:        "public registry, explicit host",
-			source:      "registry.terraform.io/hashicorp/consul/aws",
-			wantString:  "registry.terraform.io/hashicorp/consul/aws",
+			source:      "registry.opentofu.org/hashicorp/consul/aws",
+			wantString:  "registry.opentofu.org/hashicorp/consul/aws",
 			wantDisplay: "hashicorp/consul/aws",
 			wantNorm:    "hashicorp/consul/aws",
 			wantErr:     false,
