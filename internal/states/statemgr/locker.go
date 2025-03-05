@@ -1,4 +1,6 @@
-// Copyright (c) HashiCorp, Inc.
+// Copyright (c) The OpenTofu Authors
+// SPDX-License-Identifier: MPL-2.0
+// Copyright (c) 2023 HashiCorp, Inc.
 // SPDX-License-Identifier: MPL-2.0
 
 package statemgr
@@ -64,6 +66,16 @@ type Locker interface {
 	Unlock(id string) error
 }
 
+// OptionalLocker extends Locker interface to allow callers
+// to know whether or not locking is actually enabled.
+// This is useful for some of the backends, which support
+// optional locking based on the configuration (such as S3,
+// OSS and HTTP backends).
+type OptionalLocker interface {
+	Locker
+	IsLockingEnabled() bool
+}
+
 // test hook to verify that LockWithContext has attempted a lock
 var postLockHook func()
 
@@ -87,14 +99,17 @@ func LockWithContext(ctx context.Context, s Locker, info *LockInfo) (string, err
 			return "", err
 		}
 
-		if le == nil || le.Info == nil || le.Info.ID == "" {
-			// If we don't have a complete LockError then there's something
-			// wrong with the lock.
+		if !le.Retriable() {
 			return "", err
 		}
 
 		if postLockHook != nil {
 			postLockHook()
+		}
+
+		// Lock() can be repeated without sleep
+		if le.RetriableWithoutDelay() {
+			continue
 		}
 
 		// there's an existing lock, wait and try again
@@ -119,25 +134,25 @@ type LockInfo struct {
 	// Unique ID for the lock. NewLockInfo provides a random ID, but this may
 	// be overridden by the lock implementation. The final value of ID will be
 	// returned by the call to Lock.
-	ID string
+	ID string `json:"ID"`
 
 	// OpenTofu operation, provided by the caller.
-	Operation string
+	Operation string `json:"Operation"`
 
 	// Extra information to store with the lock, provided by the caller.
-	Info string
+	Info string `json:"Info"`
 
 	// user@hostname when available
-	Who string
+	Who string `json:"Who"`
 
 	// OpenTofu version
-	Version string
+	Version string `json:"Version"`
 
 	// Time that the lock was taken.
-	Created time.Time
+	Created time.Time `json:"Created"`
 
 	// Path to the state file when applicable. Set by the Lock implementation.
-	Path string
+	Path string `json:"Path"`
 }
 
 // NewLockInfo creates a LockInfo object and populates many of its fields
@@ -212,6 +227,10 @@ func (l *LockInfo) String() string {
 type LockError struct {
 	Info *LockInfo
 	Err  error
+
+	// Set when writing of lock file fails because of conflict and
+	// then reading fails because file doesn't exist (removed by other process)
+	InconsistentRead bool
 }
 
 func (e *LockError) Error() string {
@@ -224,4 +243,20 @@ func (e *LockError) Error() string {
 		out = append(out, e.Info.String())
 	}
 	return strings.Join(out, "\n")
+}
+
+// Retriable returns true when locking should be retried
+func (e *LockError) Retriable() bool {
+	// If we don't have a complete LockError then there's something
+	// wrong with the lock.
+	if e == nil {
+		return false
+	}
+
+	return e.InconsistentRead || (e.Info != nil && e.Info.ID != "")
+}
+
+// RetriableWithoutDelay returns true when delaying can be avoided
+func (e *LockError) RetriableWithoutDelay() bool {
+	return e != nil && e.InconsistentRead
 }

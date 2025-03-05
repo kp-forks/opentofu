@@ -1,4 +1,6 @@
-// Copyright (c) HashiCorp, Inc.
+// Copyright (c) The OpenTofu Authors
+// SPDX-License-Identifier: MPL-2.0
+// Copyright (c) 2023 HashiCorp, Inc.
 // SPDX-License-Identifier: MPL-2.0
 
 package tofu
@@ -44,10 +46,10 @@ func TestGraphNodeImportStateExecute(t *testing.T) {
 			Name: "foo",
 		}.Instance(addrs.NoKey).Absolute(addrs.RootModuleInstance),
 		ID: "bar",
-		ResolvedProvider: addrs.AbsProviderConfig{
+		ResolvedProvider: ResolvedProvider{ProviderConfig: addrs.AbsProviderConfig{
 			Provider: addrs.NewDefaultProvider("aws"),
 			Module:   addrs.RootModule,
-		},
+		}},
 	}
 
 	diags := node.Execute(ctx, walkImport)
@@ -100,10 +102,10 @@ func TestGraphNodeImportStateSubExecute(t *testing.T) {
 			Name: "foo",
 		}.Instance(addrs.NoKey).Absolute(addrs.RootModuleInstance),
 		State: importedResource,
-		ResolvedProvider: addrs.AbsProviderConfig{
+		ResolvedProvider: ResolvedProvider{ProviderConfig: addrs.AbsProviderConfig{
 			Provider: addrs.NewDefaultProvider("aws"),
 			Module:   addrs.RootModule,
-		},
+		}},
 	}
 	diags := node.Execute(ctx, walkImport)
 	if diags.HasErrors() {
@@ -114,7 +116,7 @@ func TestGraphNodeImportStateSubExecute(t *testing.T) {
 	actual := strings.TrimSpace(state.String())
 	expected := `aws_instance.foo:
   ID = bar
-  provider = provider["registry.terraform.io/hashicorp/aws"]`
+  provider = provider["registry.opentofu.org/hashicorp/aws"]`
 	if actual != expected {
 		t.Fatalf("bad state after import: \n%s", actual)
 	}
@@ -162,10 +164,10 @@ func TestGraphNodeImportStateSubExecuteNull(t *testing.T) {
 			Name: "foo",
 		}.Instance(addrs.NoKey).Absolute(addrs.RootModuleInstance),
 		State: importedResource,
-		ResolvedProvider: addrs.AbsProviderConfig{
+		ResolvedProvider: ResolvedProvider{ProviderConfig: addrs.AbsProviderConfig{
 			Provider: addrs.NewDefaultProvider("aws"),
 			Module:   addrs.RootModule,
-		},
+		}},
 	}
 	diags := node.Execute(ctx, walkImport)
 	if !diags.HasErrors() {

@@ -1,4 +1,6 @@
-// Copyright (c) HashiCorp, Inc.
+// Copyright (c) The OpenTofu Authors
+// SPDX-License-Identifier: MPL-2.0
+// Copyright (c) 2023 HashiCorp, Inc.
 // SPDX-License-Identifier: MPL-2.0
 
 //go:build !race
@@ -232,7 +234,7 @@ func TestKeepAlives(t *testing.T) {
 	}
 }
 
-// TestDeadConnection verifies that failed keepalive messages will eventually
+// TestFailedKeepAlives verifies that failed keepalive messages will eventually
 // kill the connection.
 func TestFailedKeepAlives(t *testing.T) {
 	ivl := keepAliveInterval
@@ -749,7 +751,7 @@ func acceptPublicKey(keystr string) func(ssh.ConnMetadata, ssh.PublicKey) (*ssh.
 	return func(_ ssh.ConnMetadata, inkey ssh.PublicKey) (*ssh.Permissions, error) {
 		goodkey, _, _, _, err := ssh.ParseAuthorizedKey([]byte(keystr))
 		if err != nil {
-			return nil, fmt.Errorf("error parsing key: %v", err)
+			return nil, fmt.Errorf("error parsing key: %w", err)
 		}
 
 		if bytes.Equal(inkey.Marshal(), goodkey.Marshal()) {

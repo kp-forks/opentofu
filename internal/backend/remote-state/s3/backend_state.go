@@ -1,18 +1,22 @@
-// Copyright (c) HashiCorp, Inc.
+// Copyright (c) The OpenTofu Authors
+// SPDX-License-Identifier: MPL-2.0
+// Copyright (c) 2023 HashiCorp, Inc.
 // SPDX-License-Identifier: MPL-2.0
 
 package s3
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"path"
 	"sort"
 	"strings"
 
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/awserr"
-	"github.com/aws/aws-sdk-go/service/s3"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
+	types "github.com/aws/aws-sdk-go-v2/service/s3/types"
+	"github.com/aws/smithy-go"
 
 	"github.com/opentofu/opentofu/internal/backend"
 	"github.com/opentofu/opentofu/internal/states"
@@ -29,25 +33,43 @@ func (b *Backend) Workspaces() ([]string, error) {
 		prefix = b.workspaceKeyPrefix + "/"
 	}
 
-	params := &s3.ListObjectsInput{
-		Bucket:  &b.bucketName,
+	params := &s3.ListObjectsV2Input{
+		Bucket:  aws.String(b.bucketName),
 		Prefix:  aws.String(prefix),
-		MaxKeys: aws.Int64(maxKeys),
+		MaxKeys: aws.Int32(maxKeys),
 	}
 
+	ctx := context.TODO()
+
+	ctx, _ = attachLoggerToContext(ctx)
+
 	wss := []string{backend.DefaultStateName}
-	err := b.s3Client.ListObjectsPages(params, func(page *s3.ListObjectsOutput, lastPage bool) bool {
+	pg := s3.NewListObjectsV2Paginator(b.s3Client, params)
+
+	for pg.HasMorePages() {
+		page, err := pg.NextPage(ctx)
+		if err != nil {
+			var noBucketErr *types.NoSuchBucket
+			if errors.As(err, &noBucketErr) {
+				return nil, fmt.Errorf(errS3NoSuchBucket, err)
+			}
+
+			// Ignoring AccessDenied errors for backward compatibility,
+			// since it should work for default state when no other workspaces present.
+			var apiErr smithy.APIError
+			if errors.As(err, &apiErr) && apiErr.ErrorCode() == "AccessDenied" {
+				break
+			}
+
+			return nil, err
+		}
+
 		for _, obj := range page.Contents {
 			ws := b.keyEnv(*obj.Key)
 			if ws != "" {
 				wss = append(wss, ws)
 			}
 		}
-		return !lastPage
-	})
-
-	if awsErr, ok := err.(awserr.Error); ok && awsErr.Code() == s3.ErrCodeNoSuchBucket {
-		return nil, fmt.Errorf(errS3NoSuchBucket, err)
 	}
 
 	sort.Strings(wss[1:])
@@ -122,6 +144,8 @@ func (b *Backend) remoteClient(name string) (*RemoteClient, error) {
 		acl:                   b.acl,
 		kmsKeyID:              b.kmsKeyID,
 		ddbTable:              b.ddbTable,
+		skipS3Checksum:        b.skipS3Checksum,
+		useLockfile:           b.useLockfile,
 	}
 
 	return client, nil
@@ -133,7 +157,7 @@ func (b *Backend) StateMgr(name string) (statemgr.Full, error) {
 		return nil, err
 	}
 
-	stateMgr := &remote.State{Client: client}
+	stateMgr := remote.NewState(client, b.encryption)
 	// Check to see if this state already exists.
 	// If we're trying to force-unlock a state, we can't take the lock before
 	// fetching the state. If the state doesn't exist, we have to assume this

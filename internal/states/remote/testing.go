@@ -1,4 +1,6 @@
-// Copyright (c) HashiCorp, Inc.
+// Copyright (c) The OpenTofu Authors
+// SPDX-License-Identifier: MPL-2.0
+// Copyright (c) 2023 HashiCorp, Inc.
 // SPDX-License-Identifier: MPL-2.0
 
 package remote
@@ -7,6 +9,7 @@ import (
 	"bytes"
 	"testing"
 
+	"github.com/opentofu/opentofu/internal/encryption"
 	"github.com/opentofu/opentofu/internal/states/statefile"
 	"github.com/opentofu/opentofu/internal/states/statemgr"
 )
@@ -16,7 +19,7 @@ func TestClient(t *testing.T, c Client) {
 	var buf bytes.Buffer
 	s := statemgr.TestFullInitialState()
 	sf := statefile.New(s, "stub-lineage", 2)
-	err := statefile.Write(sf, &buf)
+	err := statefile.Write(sf, &buf, encryption.StateEncryptionDisabled())
 	if err != nil {
 		t.Fatalf("err: %s", err)
 	}
@@ -48,7 +51,7 @@ func TestClient(t *testing.T, c Client) {
 }
 
 // Test the lock implementation for a remote.Client.
-// This test requires 2 client instances, in oder to have multiple remote
+// This test requires 2 client instances, in order to have multiple remote
 // clients since some implementations may tie the client to the lock, or may
 // have reentrant locks.
 func TestRemoteLocks(t *testing.T, a, b Client) {

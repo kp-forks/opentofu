@@ -1,4 +1,6 @@
-// Copyright (c) HashiCorp, Inc.
+// Copyright (c) The OpenTofu Authors
+// SPDX-License-Identifier: MPL-2.0
+// Copyright (c) 2023 HashiCorp, Inc.
 // SPDX-License-Identifier: MPL-2.0
 
 package cloud
@@ -13,12 +15,12 @@ import (
 	"testing"
 	"time"
 
-	gomock "github.com/golang/mock/gomock"
 	"github.com/google/go-cmp/cmp"
 	tfe "github.com/hashicorp/go-tfe"
 	mocks "github.com/hashicorp/go-tfe/mocks"
 	version "github.com/hashicorp/go-version"
 	"github.com/mitchellh/cli"
+	gomock "go.uber.org/mock/gomock"
 
 	"github.com/opentofu/opentofu/internal/addrs"
 	"github.com/opentofu/opentofu/internal/backend"
@@ -56,7 +58,7 @@ func testOperationApplyWithTimeout(t *testing.T, configDir string, timeout time.
 	// Many of our tests use an overridden "null" provider that's just in-memory
 	// inside the test process, not a separate plugin on disk.
 	depLocks := depsfile.NewLocks()
-	depLocks.SetProviderOverridden(addrs.MustParseProviderSourceString("registry.terraform.io/hashicorp/null"))
+	depLocks.SetProviderOverridden(addrs.MustParseProviderSourceString("registry.opentofu.org/hashicorp/null"))
 
 	return &backend.Operation{
 		ConfigDir:       configDir,
@@ -103,7 +105,7 @@ func TestCloud_applyBasic(t *testing.T) {
 	}
 
 	output := b.CLI.(*cli.MockUi).OutputWriter.String()
-	if !strings.Contains(output, "Running apply in Terraform Cloud") {
+	if !strings.Contains(output, "Running apply in cloud backend") {
 		t.Fatalf("expected TFC header in output: %s", output)
 	}
 	if !strings.Contains(output, "1 to add, 0 to change, 0 to destroy") {
@@ -621,6 +623,45 @@ func TestCloud_applyWithTarget(t *testing.T) {
 	}
 }
 
+// Applying with an exclude flag should error
+func TestCloud_applyWithExclude(t *testing.T) {
+	b, bCleanup := testBackendWithName(t)
+	defer bCleanup()
+
+	op, configCleanup, done := testOperationApply(t, "./testdata/apply")
+	defer configCleanup()
+
+	addr, _ := addrs.ParseAbsResourceStr("null_resource.foo")
+
+	op.Workspace = testBackendSingleWorkspaceName
+	op.Excludes = []addrs.Targetable{addr}
+
+	run, err := b.Operation(context.Background(), op)
+	if err != nil {
+		t.Fatalf("error starting operation: %v", err)
+	}
+
+	<-run.Done()
+	output := done(t)
+	if run.Result == backend.OperationSuccess {
+		t.Fatal("expected apply operation to fail")
+	}
+	if !run.PlanEmpty {
+		t.Fatalf("expected plan to be empty")
+	}
+
+	errOutput := output.Stderr()
+	if !strings.Contains(errOutput, "-exclude option is not supported") {
+		t.Fatalf("expected -exclude option is not supported error, got: %v", errOutput)
+	}
+
+	stateMgr, _ := b.StateMgr(testBackendSingleWorkspaceName)
+	// An error suggests that the state was not unlocked after apply
+	if _, err := stateMgr.Lock(statemgr.NewLockInfo()); err != nil {
+		t.Fatalf("unexpected error locking state after failed apply: %s", err.Error())
+	}
+}
+
 func TestCloud_applyWithReplace(t *testing.T) {
 	b, bCleanup := testBackendWithName(t)
 	defer bCleanup()
@@ -684,7 +725,7 @@ func TestCloud_applyWithRequiredVariables(t *testing.T) {
 	}
 
 	output := b.CLI.(*cli.MockUi).OutputWriter.String()
-	if !strings.Contains(output, "Running apply in Terraform Cloud") {
+	if !strings.Contains(output, "Running apply in cloud backend") {
 		t.Fatalf("unexpected TFC header in output: %s", output)
 	}
 }
@@ -838,7 +879,7 @@ func TestCloud_applyAutoApprove(t *testing.T) {
 	}
 
 	output := b.CLI.(*cli.MockUi).OutputWriter.String()
-	if !strings.Contains(output, "Running apply in Terraform Cloud") {
+	if !strings.Contains(output, "Running apply in cloud backend") {
 		t.Fatalf("expected TFC header in output: %s", output)
 	}
 	if !strings.Contains(output, "1 to add, 0 to change, 0 to destroy") {
@@ -909,7 +950,7 @@ func TestCloud_applyApprovedExternally(t *testing.T) {
 	}
 
 	output := b.CLI.(*cli.MockUi).OutputWriter.String()
-	if !strings.Contains(output, "Running apply in Terraform Cloud") {
+	if !strings.Contains(output, "Running apply in cloud backend") {
 		t.Fatalf("expected TFC header in output: %s", output)
 	}
 	if !strings.Contains(output, "1 to add, 0 to change, 0 to destroy") {
@@ -983,7 +1024,7 @@ func TestCloud_applyDiscardedExternally(t *testing.T) {
 	}
 
 	output := b.CLI.(*cli.MockUi).OutputWriter.String()
-	if !strings.Contains(output, "Running apply in Terraform Cloud") {
+	if !strings.Contains(output, "Running apply in cloud backend") {
 		t.Fatalf("expected TFC header in output: %s", output)
 	}
 	if !strings.Contains(output, "1 to add, 0 to change, 0 to destroy") {
@@ -1052,7 +1093,7 @@ func TestCloud_applyWithAutoApprove(t *testing.T) {
 	}
 
 	output := b.CLI.(*cli.MockUi).OutputWriter.String()
-	if !strings.Contains(output, "Running apply in Terraform Cloud") {
+	if !strings.Contains(output, "Running apply in cloud backend") {
 		t.Fatalf("expected TFC header in output: %s", output)
 	}
 	if !strings.Contains(output, "1 to add, 0 to change, 0 to destroy") {
@@ -1066,10 +1107,7 @@ func TestCloud_applyWithAutoApprove(t *testing.T) {
 func TestCloud_applyForceLocal(t *testing.T) {
 	// Set TF_FORCE_LOCAL_BACKEND so the cloud backend will use
 	// the local backend with itself as embedded backend.
-	if err := os.Setenv("TF_FORCE_LOCAL_BACKEND", "1"); err != nil {
-		t.Fatalf("error setting environment variable TF_FORCE_LOCAL_BACKEND: %v", err)
-	}
-	defer os.Unsetenv("TF_FORCE_LOCAL_BACKEND")
+	t.Setenv("TF_FORCE_LOCAL_BACKEND", "1")
 
 	b, bCleanup := testBackendWithName(t)
 	defer bCleanup()
@@ -1108,7 +1146,7 @@ func TestCloud_applyForceLocal(t *testing.T) {
 	}
 
 	output := b.CLI.(*cli.MockUi).OutputWriter.String()
-	if strings.Contains(output, "Running apply in Terraform Cloud") {
+	if strings.Contains(output, "Running apply in cloud backend") {
 		t.Fatalf("unexpected TFC header in output: %s", output)
 	}
 	if output := done(t).Stdout(); !strings.Contains(output, "1 to add, 0 to change, 0 to destroy") {
@@ -1171,7 +1209,7 @@ func TestCloud_applyWorkspaceWithoutOperations(t *testing.T) {
 	}
 
 	output := b.CLI.(*cli.MockUi).OutputWriter.String()
-	if strings.Contains(output, "Running apply in Terraform Cloud") {
+	if strings.Contains(output, "Running apply in cloud backend") {
 		t.Fatalf("unexpected TFC header in output: %s", output)
 	}
 	if output := done(t).Stdout(); !strings.Contains(output, "1 to add, 0 to change, 0 to destroy") {
@@ -1242,11 +1280,11 @@ func TestCloud_applyLockTimeout(t *testing.T) {
 	}
 
 	output := b.CLI.(*cli.MockUi).OutputWriter.String()
-	if !strings.Contains(output, "Running apply in Terraform Cloud") {
+	if !strings.Contains(output, "Running apply in cloud backend") {
 		t.Fatalf("expected TFC header in output: %s", output)
 	}
 	if !strings.Contains(output, "Lock timeout exceeded") {
-		t.Fatalf("expected lock timout error in output: %s", output)
+		t.Fatalf("expected lock timeout error in output: %s", output)
 	}
 	if strings.Contains(output, "1 to add, 0 to change, 0 to destroy") {
 		t.Fatalf("unexpected plan summery in output: %s", output)
@@ -1291,7 +1329,7 @@ func TestCloud_applyDestroy(t *testing.T) {
 	}
 
 	output := b.CLI.(*cli.MockUi).OutputWriter.String()
-	if !strings.Contains(output, "Running apply in Terraform Cloud") {
+	if !strings.Contains(output, "Running apply in cloud backend") {
 		t.Fatalf("expected TFC header in output: %s", output)
 	}
 	if !strings.Contains(output, "0 to add, 0 to change, 1 to destroy") {
@@ -1468,7 +1506,7 @@ func TestCloud_applyPolicyPass(t *testing.T) {
 	}
 
 	output := b.CLI.(*cli.MockUi).OutputWriter.String()
-	if !strings.Contains(output, "Running apply in Terraform Cloud") {
+	if !strings.Contains(output, "Running apply in cloud backend") {
 		t.Fatalf("expected TFC header in output: %s", output)
 	}
 	if !strings.Contains(output, "1 to add, 0 to change, 0 to destroy") {
@@ -1521,7 +1559,7 @@ func TestCloud_applyPolicyHardFail(t *testing.T) {
 	}
 
 	output := b.CLI.(*cli.MockUi).OutputWriter.String()
-	if !strings.Contains(output, "Running apply in Terraform Cloud") {
+	if !strings.Contains(output, "Running apply in cloud backend") {
 		t.Fatalf("expected TFC header in output: %s", output)
 	}
 	if !strings.Contains(output, "1 to add, 0 to change, 0 to destroy") {
@@ -1571,7 +1609,7 @@ func TestCloud_applyPolicySoftFail(t *testing.T) {
 	}
 
 	output := b.CLI.(*cli.MockUi).OutputWriter.String()
-	if !strings.Contains(output, "Running apply in Terraform Cloud") {
+	if !strings.Contains(output, "Running apply in cloud backend") {
 		t.Fatalf("expected TFC header in output: %s", output)
 	}
 	if !strings.Contains(output, "1 to add, 0 to change, 0 to destroy") {
@@ -1639,7 +1677,7 @@ func TestCloud_applyPolicySoftFailAutoApproveSuccess(t *testing.T) {
 	}
 
 	if run.PlanEmpty {
-		t.Fatalf("expected plan to not be empty, plan opertion completed without error")
+		t.Fatalf("expected plan to not be empty, plan operation completed without error")
 	}
 
 	if len(input.answers) != 0 {
@@ -1653,7 +1691,7 @@ func TestCloud_applyPolicySoftFailAutoApproveSuccess(t *testing.T) {
 
 	output := b.CLI.(*cli.MockUi).OutputWriter.String()
 	if !strings.Contains(output, "Sentinel Result: false") {
-		t.Fatalf("expected policy check to be false, insead got: %s", output)
+		t.Fatalf("expected policy check to be false, instead got: %s", output)
 	}
 	if !strings.Contains(output, "Apply complete!") {
 		t.Fatalf("expected apply to be complete, instead got: %s", output)
@@ -1720,7 +1758,7 @@ func TestCloud_applyPolicySoftFailAutoApprove(t *testing.T) {
 	}
 
 	output := b.CLI.(*cli.MockUi).OutputWriter.String()
-	if !strings.Contains(output, "Running apply in Terraform Cloud") {
+	if !strings.Contains(output, "Running apply in cloud backend") {
 		t.Fatalf("expected TFC header in output: %s", output)
 	}
 	if !strings.Contains(output, "1 to add, 0 to change, 0 to destroy") {
@@ -1924,7 +1962,7 @@ func TestCloud_applyVersionCheck(t *testing.T) {
 					t.Fatalf("operation failed: %s", b.CLI.(*cli.MockUi).ErrorWriter.String())
 				}
 				output := b.CLI.(*cli.MockUi).OutputWriter.String()
-				hasRemote := strings.Contains(output, "Running apply in Terraform Cloud")
+				hasRemote := strings.Contains(output, "Running apply in cloud backend")
 				hasSummary := strings.Contains(output, "1 added, 0 changed, 0 destroyed")
 				hasResources := run.State.HasManagedResourceInstanceObjects()
 				if !tc.forceLocal && !isLocalExecutionMode(tc.executionMode) {

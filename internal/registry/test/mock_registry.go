@@ -19,7 +19,7 @@ import (
 	tfversion "github.com/opentofu/opentofu/version"
 )
 
-// Disco return a *disco.Disco mapping registry.terraform.io, localhost,
+// Disco return a *disco.Disco mapping registry.opentofu.org, localhost,
 // localhost.localdomain, and example.com to the test server.
 func Disco(s *httptest.Server) *disco.Disco {
 	services := map[string]interface{}{
@@ -31,7 +31,7 @@ func Disco(s *httptest.Server) *disco.Disco {
 	d := disco.NewWithCredentialsSource(credsSrc)
 	d.SetUserAgent(httpclient.OpenTofuUserAgent(tfversion.String()))
 
-	d.ForceHostServices(svchost.Hostname("registry.terraform.io"), services)
+	d.ForceHostServices(svchost.Hostname("registry.opentofu.org"), services)
 	d.ForceHostServices(svchost.Hostname("localhost"), services)
 	d.ForceHostServices(svchost.Hostname("localhost.localdomain"), services)
 	d.ForceHostServices(svchost.Hostname("example.com"), services)
@@ -63,8 +63,8 @@ var (
 	})
 )
 
-// All the locationes from the mockRegistry start with a file:// scheme. If
-// the the location string here doesn't have a scheme, the mockRegistry will
+// All the locations from the mockRegistry start with a file:// scheme. If
+// the location string here doesn't have a scheme, the mockRegistry will
 // find the absolute path and return a complete URL.
 var testMods = map[string][]testMod{
 	"registry/foo/bar": {{
@@ -131,7 +131,7 @@ func init() {
 	}
 }
 
-func mockRegHandler() http.Handler {
+func mockRegHandler(config map[uint8]struct{}) http.Handler {
 	mux := http.NewServeMux()
 
 	moduleDownload := func(w http.ResponseWriter, r *http.Request) {
@@ -167,9 +167,26 @@ func mockRegHandler() http.Handler {
 			location = fmt.Sprintf("file://%s/%s", wd, location)
 		}
 
-		w.Header().Set("X-Terraform-Get", location)
+		// the location will be returned in the response header
+		_, inHeader := config[WithModuleLocationInHeader]
+		// the location will be returned in the response body
+		_, inBody := config[WithModuleLocationInBody]
+
+		if inHeader {
+			w.Header().Set("X-Terraform-Get", location)
+		}
+
+		if inBody {
+			w.WriteHeader(http.StatusOK)
+			o, err := json.Marshal(response.ModuleLocationRegistryResp{Location: location})
+			if err != nil {
+				panic("mock error: " + err.Error())
+			}
+			_, _ = w.Write(o)
+			return
+		}
+
 		w.WriteHeader(http.StatusNoContent)
-		// no body
 	}
 
 	moduleVersions := func(w http.ResponseWriter, r *http.Request) {
@@ -196,7 +213,7 @@ func mockRegHandler() http.Handler {
 		}
 
 		// only adding the single requested module for now
-		// this is the minimal that any regisry is epected to support
+		// this is the minimal that any registry is expected to support
 		mpvs := &response.ModuleProviderVersions{
 			Source: name,
 		}
@@ -244,9 +261,29 @@ func mockRegHandler() http.Handler {
 	return mux
 }
 
+const (
+	// WithModuleLocationInBody sets to return the module's location in the response body
+	WithModuleLocationInBody uint8 = iota
+	// WithModuleLocationInHeader sets to return the module's location in the response header
+	WithModuleLocationInHeader
+)
+
 // Registry returns an httptest server that mocks out some registry functionality.
-func Registry() *httptest.Server {
-	return httptest.NewServer(mockRegHandler())
+func Registry(flags ...uint8) *httptest.Server {
+	if len(flags) == 0 {
+		return httptest.NewServer(mockRegHandler(
+			map[uint8]struct{}{
+				// default setting
+				WithModuleLocationInBody: {},
+			},
+		))
+	}
+
+	cfg := map[uint8]struct{}{}
+	for _, flag := range flags {
+		cfg[flag] = struct{}{}
+	}
+	return httptest.NewServer(mockRegHandler(cfg))
 }
 
 // RegistryRetryableErrorsServer returns an httptest server that mocks out the

@@ -1,10 +1,13 @@
-// Copyright (c) HashiCorp, Inc.
+// Copyright (c) The OpenTofu Authors
+// SPDX-License-Identifier: MPL-2.0
+// Copyright (c) 2023 HashiCorp, Inc.
 // SPDX-License-Identifier: MPL-2.0
 
 package getproviders
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/apparentlymart/go-versions/versions"
@@ -28,28 +31,28 @@ func TestFilesystemMirrorSourceAllAvailablePackages(t *testing.T) {
 				Version:        versions.MustParseVersion("2.0.0"),
 				TargetPlatform: Platform{"darwin", "amd64"},
 				Filename:       "terraform-provider-null_2.0.0_darwin_amd64.zip",
-				Location:       PackageLocalDir("testdata/filesystem-mirror/registry.terraform.io/hashicorp/null/2.0.0/darwin_amd64"),
+				Location:       PackageLocalDir("testdata/filesystem-mirror/registry.opentofu.org/hashicorp/null/2.0.0/darwin_amd64"),
 			},
 			{
 				Provider:       nullProvider,
 				Version:        versions.MustParseVersion("2.0.0"),
 				TargetPlatform: Platform{"linux", "amd64"},
 				Filename:       "terraform-provider-null_2.0.0_linux_amd64.zip",
-				Location:       PackageLocalDir("testdata/filesystem-mirror/registry.terraform.io/hashicorp/null/2.0.0/linux_amd64"),
+				Location:       PackageLocalDir("testdata/filesystem-mirror/registry.opentofu.org/hashicorp/null/2.0.0/linux_amd64"),
 			},
 			{
 				Provider:       nullProvider,
 				Version:        versions.MustParseVersion("2.1.0"),
 				TargetPlatform: Platform{"linux", "amd64"},
 				Filename:       "terraform-provider-null_2.1.0_linux_amd64.zip",
-				Location:       PackageLocalArchive("testdata/filesystem-mirror/registry.terraform.io/hashicorp/null/terraform-provider-null_2.1.0_linux_amd64.zip"),
+				Location:       PackageLocalArchive("testdata/filesystem-mirror/registry.opentofu.org/hashicorp/null/terraform-provider-null_2.1.0_linux_amd64.zip"),
 			},
 			{
 				Provider:       nullProvider,
 				Version:        versions.MustParseVersion("2.0.0"),
 				TargetPlatform: Platform{"windows", "amd64"},
 				Filename:       "terraform-provider-null_2.0.0_windows_amd64.zip",
-				Location:       PackageLocalDir("testdata/filesystem-mirror/registry.terraform.io/hashicorp/null/2.0.0/windows_amd64"),
+				Location:       PackageLocalDir("testdata/filesystem-mirror/registry.opentofu.org/hashicorp/null/2.0.0/windows_amd64"),
 			},
 		},
 		randomBetaProvider: {
@@ -58,7 +61,7 @@ func TestFilesystemMirrorSourceAllAvailablePackages(t *testing.T) {
 				Version:        versions.MustParseVersion("1.2.0"),
 				TargetPlatform: Platform{"linux", "amd64"},
 				Filename:       "terraform-provider-random-beta_1.2.0_linux_amd64.zip",
-				Location:       PackageLocalDir("testdata/filesystem-mirror/registry.terraform.io/hashicorp/random-beta/1.2.0/linux_amd64"),
+				Location:       PackageLocalDir("testdata/filesystem-mirror/registry.opentofu.org/hashicorp/random-beta/1.2.0/linux_amd64"),
 			},
 		},
 		randomProvider: {
@@ -67,7 +70,7 @@ func TestFilesystemMirrorSourceAllAvailablePackages(t *testing.T) {
 				Version:        versions.MustParseVersion("1.2.0"),
 				TargetPlatform: Platform{"linux", "amd64"},
 				Filename:       "terraform-provider-random_1.2.0_linux_amd64.zip",
-				Location:       PackageLocalDir("testdata/filesystem-mirror/registry.terraform.io/hashicorp/random/1.2.0/linux_amd64"),
+				Location:       PackageLocalDir("testdata/filesystem-mirror/registry.opentofu.org/hashicorp/random/1.2.0/linux_amd64"),
 			},
 		},
 
@@ -86,7 +89,7 @@ func TestFilesystemMirrorSourceAllAvailablePackages(t *testing.T) {
 				Version:        versions.MustParseVersion("1.0.0"),
 				TargetPlatform: Platform{"linux", "amd64"},
 				Filename:       "terraform-provider-legacy_1.0.0_linux_amd64.zip",
-				Location:       PackageLocalDir("testdata/filesystem-mirror/registry.terraform.io/-/legacy/1.0.0/linux_amd64"),
+				Location:       PackageLocalDir("testdata/filesystem-mirror/registry.opentofu.org/-/legacy/1.0.0/linux_amd64"),
 			},
 		},
 	}
@@ -123,6 +126,30 @@ func TestFilesystemMirrorSourceAvailableVersions(t *testing.T) {
 	}
 }
 
+func TestFilesystemMirrorSourceAvailableVersions_Unspecified(t *testing.T) {
+	unspecifiedProvider := addrs.Provider{
+		Hostname:  svchost.Hostname("registry.opentofu.org"),
+		Namespace: "testnamespace",
+		Type:      "unspecified",
+	}
+	source := NewFilesystemMirrorSource("testdata/filesystem-mirror-unspecified")
+	got, warn, err := source.AvailableVersions(context.Background(), unspecifiedProvider)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Check that we got the unspecified version
+	if len(got) != 1 || got[0] != versions.Unspecified {
+		t.Fatalf("expected unspecified version, got %v", got)
+	}
+	// We should have unspecified (0.0.0) version warning
+	if len(warn) != 1 {
+		t.Fatalf("expected 1 warning, got %v", warn)
+	}
+	warningBit := "unspecified (0.0.0) version available in the filesystem mirror"
+	if !strings.Contains(warn[0], warningBit) {
+		t.Fatalf("expected warning to contain %q, got %q", warningBit, warn[0])
+	}
+}
 func TestFilesystemMirrorSourcePackageMeta(t *testing.T) {
 	t.Run("available platform", func(t *testing.T) {
 		source := NewFilesystemMirrorSource("testdata/filesystem-mirror")
@@ -141,7 +168,7 @@ func TestFilesystemMirrorSourcePackageMeta(t *testing.T) {
 			Version:        versions.MustParseVersion("2.0.0"),
 			TargetPlatform: Platform{"linux", "amd64"},
 			Filename:       "terraform-provider-null_2.0.0_linux_amd64.zip",
-			Location:       PackageLocalDir("testdata/filesystem-mirror/registry.terraform.io/hashicorp/null/2.0.0/linux_amd64"),
+			Location:       PackageLocalDir("testdata/filesystem-mirror/registry.opentofu.org/hashicorp/null/2.0.0/linux_amd64"),
 		}
 
 		if diff := cmp.Diff(want, got); diff != "" {
@@ -183,17 +210,17 @@ func TestFilesystemMirrorSourcePackageMeta(t *testing.T) {
 }
 
 var nullProvider = addrs.Provider{
-	Hostname:  svchost.Hostname("registry.terraform.io"),
+	Hostname:  svchost.Hostname("registry.opentofu.org"),
 	Namespace: "hashicorp",
 	Type:      "null",
 }
 var randomProvider = addrs.Provider{
-	Hostname:  svchost.Hostname("registry.terraform.io"),
+	Hostname:  svchost.Hostname("registry.opentofu.org"),
 	Namespace: "hashicorp",
 	Type:      "random",
 }
 var randomBetaProvider = addrs.Provider{
-	Hostname:  svchost.Hostname("registry.terraform.io"),
+	Hostname:  svchost.Hostname("registry.opentofu.org"),
 	Namespace: "hashicorp",
 	Type:      "random-beta",
 }

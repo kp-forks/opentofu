@@ -1,4 +1,6 @@
-// Copyright (c) HashiCorp, Inc.
+// Copyright (c) The OpenTofu Authors
+// SPDX-License-Identifier: MPL-2.0
+// Copyright (c) 2023 HashiCorp, Inc.
 // SPDX-License-Identifier: MPL-2.0
 
 package getproviders
@@ -177,7 +179,7 @@ func TestMultiSourceAvailableVersions(t *testing.T) {
 			t.Fatal("expected error, got success")
 		}
 
-		wantErr := `provider registry registry.terraform.io does not have a provider named registry.terraform.io/hashicorp/foo`
+		wantErr := `provider registry registry.opentofu.org does not have a provider named registry.opentofu.org/hashicorp/foo`
 
 		if err.Error() != wantErr {
 			t.Fatalf("wrong error.\ngot:  %s\nwant: %s\n", err, wantErr)
@@ -356,7 +358,7 @@ func TestMultiSourcePackageMeta(t *testing.T) {
 		)
 		// This case reports "platform not supported" because it assumes that
 		// a caller would only pass to it package versions that were returned
-		// by a previousc all to AvailableVersions, and therefore a missing
+		// by a previous call to AvailableVersions, and therefore a missing
 		// object ought to be valid provider/version but an unsupported
 		// platform.
 		if want, ok := err.(ErrPlatformNotSupported); !ok {
@@ -443,7 +445,7 @@ func TestMultiSourceSelector(t *testing.T) {
 				Include: mustParseMultiSourceMatchingPatterns("*/*"),
 			},
 			// Doesn't match because builtin providers are in "terraform.io",
-			// but a pattern with no hostname is for registry.terraform.io.
+			// but a pattern with no hostname is for registry.opentofu.org.
 			addrs.NewBuiltInProvider("bar"),
 			false,
 		},

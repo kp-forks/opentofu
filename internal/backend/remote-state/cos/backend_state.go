@@ -1,4 +1,6 @@
-// Copyright (c) HashiCorp, Inc.
+// Copyright (c) The OpenTofu Authors
+// SPDX-License-Identifier: MPL-2.0
+// Copyright (c) 2023 HashiCorp, Inc.
 // SPDX-License-Identifier: MPL-2.0
 
 package cos
@@ -41,11 +43,11 @@ func (b *Backend) Workspaces() ([]string, error) {
 		if !strings.HasSuffix(vv.Key, stateFileSuffix) {
 			continue
 		}
-		// default worksapce
+		// default workspace
 		if path.Join(b.prefix, b.key) == vv.Key {
 			continue
 		}
-		// <prefix>/<worksapce>/<key>
+		// <prefix>/<workspace>/<key>
 		prefix := strings.TrimRight(b.prefix, "/") + "/"
 		parts := strings.Split(strings.TrimPrefix(vv.Key, prefix), "/")
 		if len(parts) > 0 && parts[0] != "" {
@@ -83,7 +85,7 @@ func (b *Backend) StateMgr(name string) (statemgr.Full, error) {
 	if err != nil {
 		return nil, err
 	}
-	stateMgr := &remote.State{Client: c}
+	stateMgr := remote.NewState(c, b.encryption)
 
 	ws, err := b.Workspaces()
 	if err != nil {
