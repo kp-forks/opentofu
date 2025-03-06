@@ -1,4 +1,6 @@
-// Copyright (c) HashiCorp, Inc.
+// Copyright (c) The OpenTofu Authors
+// SPDX-License-Identifier: MPL-2.0
+// Copyright (c) 2023 HashiCorp, Inc.
 // SPDX-License-Identifier: MPL-2.0
 
 package tofu
@@ -102,7 +104,8 @@ func TestCBDEdgeTransformer(t *testing.T) {
 			Status:    states.ObjectReady,
 			AttrsJSON: []byte(`{"id":"A"}`),
 		},
-		mustProviderConfig(`provider["registry.terraform.io/hashicorp/test"]`),
+		mustProviderConfig(`provider["registry.opentofu.org/hashicorp/test"]`),
+		addrs.NoKey,
 	)
 	root.SetResourceInstanceCurrent(
 		mustResourceInstanceAddr("test_object.B").Resource,
@@ -111,7 +114,8 @@ func TestCBDEdgeTransformer(t *testing.T) {
 			AttrsJSON:    []byte(`{"id":"B","test_list":["x"]}`),
 			Dependencies: []addrs.ConfigResource{mustConfigResourceAddr("test_object.A")},
 		},
-		mustProviderConfig(`provider["registry.terraform.io/hashicorp/test"]`),
+		mustProviderConfig(`provider["registry.opentofu.org/hashicorp/test"]`),
+		addrs.NoKey,
 	)
 
 	g := cbdTestGraph(t, "transform-destroy-cbd-edge-basic", changes, state)
@@ -163,7 +167,8 @@ func TestCBDEdgeTransformerMulti(t *testing.T) {
 			Status:    states.ObjectReady,
 			AttrsJSON: []byte(`{"id":"A"}`),
 		},
-		mustProviderConfig(`provider["registry.terraform.io/hashicorp/test"]`),
+		mustProviderConfig(`provider["registry.opentofu.org/hashicorp/test"]`),
+		addrs.NoKey,
 	)
 	root.SetResourceInstanceCurrent(
 		mustResourceInstanceAddr("test_object.B").Resource,
@@ -171,7 +176,8 @@ func TestCBDEdgeTransformerMulti(t *testing.T) {
 			Status:    states.ObjectReady,
 			AttrsJSON: []byte(`{"id":"B"}`),
 		},
-		mustProviderConfig(`provider["registry.terraform.io/hashicorp/test"]`),
+		mustProviderConfig(`provider["registry.opentofu.org/hashicorp/test"]`),
+		addrs.NoKey,
 	)
 	root.SetResourceInstanceCurrent(
 		mustResourceInstanceAddr("test_object.C").Resource,
@@ -183,7 +189,8 @@ func TestCBDEdgeTransformerMulti(t *testing.T) {
 				mustConfigResourceAddr("test_object.B"),
 			},
 		},
-		mustProviderConfig(`provider["registry.terraform.io/hashicorp/test"]`),
+		mustProviderConfig(`provider["registry.opentofu.org/hashicorp/test"]`),
+		addrs.NoKey,
 	)
 
 	g := cbdTestGraph(t, "transform-destroy-cbd-edge-multi", changes, state)
@@ -239,7 +246,8 @@ func TestCBDEdgeTransformer_depNonCBDCount(t *testing.T) {
 			Status:    states.ObjectReady,
 			AttrsJSON: []byte(`{"id":"A"}`),
 		},
-		mustProviderConfig(`provider["registry.terraform.io/hashicorp/test"]`),
+		mustProviderConfig(`provider["registry.opentofu.org/hashicorp/test"]`),
+		addrs.NoKey,
 	)
 	root.SetResourceInstanceCurrent(
 		mustResourceInstanceAddr("test_object.B[0]").Resource,
@@ -248,7 +256,8 @@ func TestCBDEdgeTransformer_depNonCBDCount(t *testing.T) {
 			AttrsJSON:    []byte(`{"id":"B","test_list":["x"]}`),
 			Dependencies: []addrs.ConfigResource{mustConfigResourceAddr("test_object.A")},
 		},
-		mustProviderConfig(`provider["registry.terraform.io/hashicorp/test"]`),
+		mustProviderConfig(`provider["registry.opentofu.org/hashicorp/test"]`),
+		addrs.NoKey,
 	)
 	root.SetResourceInstanceCurrent(
 		mustResourceInstanceAddr("test_object.B[1]").Resource,
@@ -257,7 +266,8 @@ func TestCBDEdgeTransformer_depNonCBDCount(t *testing.T) {
 			AttrsJSON:    []byte(`{"id":"B","test_list":["x"]}`),
 			Dependencies: []addrs.ConfigResource{mustConfigResourceAddr("test_object.A")},
 		},
-		mustProviderConfig(`provider["registry.terraform.io/hashicorp/test"]`),
+		mustProviderConfig(`provider["registry.opentofu.org/hashicorp/test"]`),
+		addrs.NoKey,
 	)
 
 	g := cbdTestGraph(t, "transform-cbd-destroy-edge-count", changes, state)
@@ -316,7 +326,8 @@ func TestCBDEdgeTransformer_depNonCBDCountBoth(t *testing.T) {
 			Status:    states.ObjectReady,
 			AttrsJSON: []byte(`{"id":"A"}`),
 		},
-		mustProviderConfig(`provider["registry.terraform.io/hashicorp/test"]`),
+		mustProviderConfig(`provider["registry.opentofu.org/hashicorp/test"]`),
+		addrs.NoKey,
 	)
 	root.SetResourceInstanceCurrent(
 		mustResourceInstanceAddr("test_object.A[1]").Resource,
@@ -324,7 +335,8 @@ func TestCBDEdgeTransformer_depNonCBDCountBoth(t *testing.T) {
 			Status:    states.ObjectReady,
 			AttrsJSON: []byte(`{"id":"A"}`),
 		},
-		mustProviderConfig(`provider["registry.terraform.io/hashicorp/test"]`),
+		mustProviderConfig(`provider["registry.opentofu.org/hashicorp/test"]`),
+		addrs.NoKey,
 	)
 	root.SetResourceInstanceCurrent(
 		mustResourceInstanceAddr("test_object.B[0]").Resource,
@@ -333,7 +345,8 @@ func TestCBDEdgeTransformer_depNonCBDCountBoth(t *testing.T) {
 			AttrsJSON:    []byte(`{"id":"B","test_list":["x"]}`),
 			Dependencies: []addrs.ConfigResource{mustConfigResourceAddr("test_object.A")},
 		},
-		mustProviderConfig(`provider["registry.terraform.io/hashicorp/test"]`),
+		mustProviderConfig(`provider["registry.opentofu.org/hashicorp/test"]`),
+		addrs.NoKey,
 	)
 	root.SetResourceInstanceCurrent(
 		mustResourceInstanceAddr("test_object.B[1]").Resource,
@@ -342,7 +355,8 @@ func TestCBDEdgeTransformer_depNonCBDCountBoth(t *testing.T) {
 			AttrsJSON:    []byte(`{"id":"B","test_list":["x"]}`),
 			Dependencies: []addrs.ConfigResource{mustConfigResourceAddr("test_object.A")},
 		},
-		mustProviderConfig(`provider["registry.terraform.io/hashicorp/test"]`),
+		mustProviderConfig(`provider["registry.opentofu.org/hashicorp/test"]`),
+		addrs.NoKey,
 	)
 
 	g := cbdTestGraph(t, "transform-cbd-destroy-edge-both-count", changes, state)

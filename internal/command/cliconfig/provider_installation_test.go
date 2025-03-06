@@ -1,4 +1,6 @@
-// Copyright (c) HashiCorp, Inc.
+// Copyright (c) The OpenTofu Authors
+// SPDX-License-Identifier: MPL-2.0
+// Copyright (c) 2023 HashiCorp, Inc.
 // SPDX-License-Identifier: MPL-2.0
 
 package cliconfig
@@ -30,8 +32,8 @@ func TestLoadConfig_providerInstallation(t *testing.T) {
 							},
 							{
 								Location: ProviderInstallationNetworkMirror("https://tf-Mirror.example.com/"),
-								Include:  []string{"registry.terraform.io/*/*"},
-								Exclude:  []string{"registry.Terraform.io/foobar/*"},
+								Include:  []string{"registry.opentofu.org/*/*"},
+								Exclude:  []string{"registry.OpenTofu.org/foobar/*"},
 							},
 							{
 								Location: ProviderInstallationFilesystemMirror("/tmp/example2"),

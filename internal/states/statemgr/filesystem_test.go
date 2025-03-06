@@ -1,4 +1,6 @@
-// Copyright (c) HashiCorp, Inc.
+// Copyright (c) The OpenTofu Authors
+// SPDX-License-Identifier: MPL-2.0
+// Copyright (c) 2023 HashiCorp, Inc.
 // SPDX-License-Identifier: MPL-2.0
 
 package statemgr
@@ -16,6 +18,7 @@ import (
 	"github.com/zclconf/go-cty/cty"
 
 	"github.com/opentofu/opentofu/internal/addrs"
+	"github.com/opentofu/opentofu/internal/encryption"
 	"github.com/opentofu/opentofu/internal/states"
 	"github.com/opentofu/opentofu/internal/states/statefile"
 	tfversion "github.com/opentofu/opentofu/version"
@@ -167,7 +170,7 @@ func TestFilesystem_backup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	bf, err := statefile.Read(bfh)
+	bf, err := statefile.Read(bfh, encryption.StateEncryptionDisabled())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -186,9 +189,10 @@ func TestFilesystem_backup(t *testing.T) {
 // not the contents of the input file (which is left unchanged).
 func TestFilesystem_backupAndReadPath(t *testing.T) {
 	defer testOverrideVersion(t, "1.2.3")()
+	info := NewLockInfo()
+	info.Operation = "test"
 
 	workDir := t.TempDir()
-
 	markerOutput := addrs.OutputValue{Name: "foo"}.Absolute(addrs.RootModuleInstance)
 
 	outState := states.BuildState(func(ss *states.SyncState) {
@@ -208,7 +212,7 @@ func TestFilesystem_backupAndReadPath(t *testing.T) {
 		Serial:           0,
 		TerraformVersion: version.Must(version.NewVersion("1.2.3")),
 		State:            outState,
-	}, outFile)
+	}, outFile, encryption.StateEncryptionDisabled())
 	if err != nil {
 		t.Fatalf("failed to write initial outfile state to %s: %s", outFile.Name(), err)
 	}
@@ -230,14 +234,14 @@ func TestFilesystem_backupAndReadPath(t *testing.T) {
 		Serial:           0,
 		TerraformVersion: version.Must(version.NewVersion("1.2.3")),
 		State:            inState,
-	}, inFile)
+	}, inFile, encryption.StateEncryptionDisabled())
 	if err != nil {
 		t.Fatalf("failed to write initial infile state to %s: %s", inFile.Name(), err)
 	}
 
 	backupPath := outFile.Name() + ".backup"
 
-	ls := NewFilesystemBetweenPaths(inFile.Name(), outFile.Name())
+	ls := NewFilesystemBetweenPaths(inFile.Name(), outFile.Name(), encryption.StateEncryptionDisabled())
 	ls.SetBackupPath(backupPath)
 
 	newState := states.BuildState(func(ss *states.SyncState) {
@@ -247,9 +251,18 @@ func TestFilesystem_backupAndReadPath(t *testing.T) {
 			false, // not sensitive
 		)
 	})
-	err = ls.WriteState(newState)
+	err = WriteAndPersist(ls, newState, nil)
 	if err != nil {
 		t.Fatalf("failed to write new state: %s", err)
+	}
+
+	lockID, err := ls.Lock(info)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := ls.Unlock(lockID); err != nil {
+		t.Fatal(err)
 	}
 
 	// The backup functionality should've saved a copy of the original contents
@@ -260,7 +273,8 @@ func TestFilesystem_backupAndReadPath(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		bf, err := statefile.Read(bfh)
+		defer bfh.Close()
+		bf, err := statefile.Read(bfh, encryption.StateEncryptionDisabled())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -274,7 +288,8 @@ func TestFilesystem_backupAndReadPath(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		of, err := statefile.Read(ofh)
+		defer ofh.Close()
+		of, err := statefile.Read(ofh, encryption.StateEncryptionDisabled())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -287,7 +302,7 @@ func TestFilesystem_backupAndReadPath(t *testing.T) {
 
 func TestFilesystem_nonExist(t *testing.T) {
 	defer testOverrideVersion(t, "1.2.3")()
-	ls := NewFilesystem("ishouldntexist")
+	ls := NewFilesystem("ishouldntexist", encryption.StateEncryptionDisabled())
 	if err := ls.RefreshState(); err != nil {
 		t.Fatalf("err: %s", err)
 	}
@@ -354,13 +369,13 @@ func testFilesystem(t *testing.T) *Filesystem {
 		Serial:           0,
 		TerraformVersion: version.Must(version.NewVersion("1.2.3")),
 		State:            TestFullInitialState(),
-	}, f)
+	}, f, encryption.StateEncryptionDisabled())
 	if err != nil {
 		t.Fatalf("failed to write initial state to %s: %s", f.Name(), err)
 	}
 	f.Close()
 
-	ls := NewFilesystem(f.Name())
+	ls := NewFilesystem(f.Name(), encryption.StateEncryptionDisabled())
 	if err := ls.RefreshState(); err != nil {
 		t.Fatalf("initial refresh failed: %s", err)
 	}
@@ -381,13 +396,13 @@ func TestFilesystem_refreshWhileLocked(t *testing.T) {
 		Serial:           0,
 		TerraformVersion: version.Must(version.NewVersion("1.2.3")),
 		State:            TestFullInitialState(),
-	}, f)
+	}, f, encryption.StateEncryptionDisabled())
 	if err != nil {
 		t.Fatalf("err: %s", err)
 	}
 	f.Close()
 
-	s := NewFilesystem(f.Name())
+	s := NewFilesystem(f.Name(), encryption.StateEncryptionDisabled())
 	defer os.Remove(s.path)
 
 	// lock first

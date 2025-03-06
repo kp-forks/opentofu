@@ -1,4 +1,6 @@
-// Copyright (c) HashiCorp, Inc.
+// Copyright (c) The OpenTofu Authors
+// SPDX-License-Identifier: MPL-2.0
+// Copyright (c) 2023 HashiCorp, Inc.
 // SPDX-License-Identifier: MPL-2.0
 
 package command
@@ -12,13 +14,17 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/hashicorp/hcl/v2"
+	"github.com/hashicorp/hcl/v2/hcltest"
 	"github.com/mitchellh/cli"
 	"github.com/zclconf/go-cty/cty"
 
 	"github.com/opentofu/opentofu/internal/addrs"
 	"github.com/opentofu/opentofu/internal/backend"
 	"github.com/opentofu/opentofu/internal/configs"
+	"github.com/opentofu/opentofu/internal/configs/configschema"
 	"github.com/opentofu/opentofu/internal/copy"
+	"github.com/opentofu/opentofu/internal/encryption"
 	"github.com/opentofu/opentofu/internal/plans"
 	"github.com/opentofu/opentofu/internal/states"
 	"github.com/opentofu/opentofu/internal/states/statefile"
@@ -38,7 +44,7 @@ func TestMetaBackend_emptyDir(t *testing.T) {
 
 	// Get the backend
 	m := testMetaBackend(t, nil)
-	b, diags := m.Backend(&BackendOpts{Init: true})
+	b, diags := m.Backend(&BackendOpts{Init: true}, encryption.StateEncryptionDisabled())
 	if diags.HasErrors() {
 		t.Fatal(diags.Err())
 	}
@@ -107,7 +113,7 @@ func TestMetaBackend_emptyWithDefaultState(t *testing.T) {
 
 	// Get the backend
 	m := testMetaBackend(t, nil)
-	b, diags := m.Backend(&BackendOpts{Init: true})
+	b, diags := m.Backend(&BackendOpts{Init: true}, encryption.StateEncryptionDisabled())
 	if diags.HasErrors() {
 		t.Fatal(diags.Err())
 	}
@@ -178,7 +184,7 @@ func TestMetaBackend_emptyWithExplicitState(t *testing.T) {
 	m.statePath = statePath
 
 	// Get the backend
-	b, diags := m.Backend(&BackendOpts{Init: true})
+	b, diags := m.Backend(&BackendOpts{Init: true}, encryption.StateEncryptionDisabled())
 	if diags.HasErrors() {
 		t.Fatal(diags.Err())
 	}
@@ -219,7 +225,7 @@ func TestMetaBackend_emptyWithExplicitState(t *testing.T) {
 	}
 }
 
-// Verify that interpolations result in an error
+// Verify that interpolations are allowed
 func TestMetaBackend_configureInterpolation(t *testing.T) {
 	// Create a temporary working directory that is empty
 	td := t.TempDir()
@@ -230,9 +236,9 @@ func TestMetaBackend_configureInterpolation(t *testing.T) {
 	m := testMetaBackend(t, nil)
 
 	// Get the backend
-	_, err := m.Backend(&BackendOpts{Init: true})
-	if err == nil {
-		t.Fatal("should error")
+	_, err := m.Backend(&BackendOpts{Init: true}, encryption.StateEncryptionDisabled())
+	if err != nil {
+		t.Fatal("should not error")
 	}
 }
 
@@ -246,7 +252,7 @@ func TestMetaBackend_configureNew(t *testing.T) {
 	m := testMetaBackend(t, nil)
 
 	// Get the backend
-	b, diags := m.Backend(&BackendOpts{Init: true})
+	b, diags := m.Backend(&BackendOpts{Init: true}, encryption.StateEncryptionDisabled())
 	if diags.HasErrors() {
 		t.Fatal(diags.Err())
 	}
@@ -279,7 +285,7 @@ func TestMetaBackend_configureNew(t *testing.T) {
 		if err != nil {
 			t.Fatalf("err: %s", err)
 		}
-		actual, err := statefile.Read(f)
+		actual, err := statefile.Read(f, encryption.StateEncryptionDisabled())
 		f.Close()
 		if err != nil {
 			t.Fatalf("err: %s", err)
@@ -317,7 +323,7 @@ func TestMetaBackend_configureNewWithState(t *testing.T) {
 	m.migrateState = false
 
 	// Get the backend
-	b, diags := m.Backend(&BackendOpts{Init: true})
+	b, diags := m.Backend(&BackendOpts{Init: true}, encryption.StateEncryptionDisabled())
 	if diags.HasErrors() {
 		t.Fatal(diags.Err())
 	}
@@ -353,7 +359,7 @@ func TestMetaBackend_configureNewWithState(t *testing.T) {
 		if err != nil {
 			t.Fatalf("err: %s", err)
 		}
-		actual, err := statefile.Read(f)
+		actual, err := statefile.Read(f, encryption.StateEncryptionDisabled())
 		f.Close()
 		if err != nil {
 			t.Fatalf("err: %s", err)
@@ -392,7 +398,7 @@ func TestMetaBackend_configureNewWithoutCopy(t *testing.T) {
 	m.input = false
 
 	// init the backend
-	_, diags := m.Backend(&BackendOpts{Init: true})
+	_, diags := m.Backend(&BackendOpts{Init: true}, encryption.StateEncryptionDisabled())
 	if diags.HasErrors() {
 		t.Fatal(diags.Err())
 	}
@@ -402,7 +408,7 @@ func TestMetaBackend_configureNewWithoutCopy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("err: %s", err)
 	}
-	actual, err := statefile.Read(f)
+	actual, err := statefile.Read(f, encryption.StateEncryptionDisabled())
 	f.Close()
 	if err != nil {
 		t.Fatalf("err: %s", err)
@@ -440,7 +446,7 @@ func TestMetaBackend_configureNewWithStateNoMigrate(t *testing.T) {
 	m := testMetaBackend(t, nil)
 
 	// Get the backend
-	b, diags := m.Backend(&BackendOpts{Init: true})
+	b, diags := m.Backend(&BackendOpts{Init: true}, encryption.StateEncryptionDisabled())
 	if diags.HasErrors() {
 		t.Fatal(diags.Err())
 	}
@@ -483,7 +489,7 @@ func TestMetaBackend_configureNewWithStateExisting(t *testing.T) {
 	m.forceInitCopy = true
 
 	// Get the backend
-	b, diags := m.Backend(&BackendOpts{Init: true})
+	b, diags := m.Backend(&BackendOpts{Init: true}, encryption.StateEncryptionDisabled())
 	if diags.HasErrors() {
 		t.Fatal(diags.Err())
 	}
@@ -519,7 +525,7 @@ func TestMetaBackend_configureNewWithStateExisting(t *testing.T) {
 		if err != nil {
 			t.Fatalf("err: %s", err)
 		}
-		actual, err := statefile.Read(f)
+		actual, err := statefile.Read(f, encryption.StateEncryptionDisabled())
 		f.Close()
 		if err != nil {
 			t.Fatalf("err: %s", err)
@@ -555,7 +561,7 @@ func TestMetaBackend_configureNewWithStateExistingNoMigrate(t *testing.T) {
 	m := testMetaBackend(t, nil)
 
 	// Get the backend
-	b, diags := m.Backend(&BackendOpts{Init: true})
+	b, diags := m.Backend(&BackendOpts{Init: true}, encryption.StateEncryptionDisabled())
 	if diags.HasErrors() {
 		t.Fatal(diags.Err())
 	}
@@ -590,7 +596,7 @@ func TestMetaBackend_configureNewWithStateExistingNoMigrate(t *testing.T) {
 		if err != nil {
 			t.Fatalf("err: %s", err)
 		}
-		actual, err := statefile.Read(f)
+		actual, err := statefile.Read(f, encryption.StateEncryptionDisabled())
 		f.Close()
 		if err != nil {
 			t.Fatalf("err: %s", err)
@@ -620,10 +626,155 @@ func TestMetaBackend_configuredUnchanged(t *testing.T) {
 	m := testMetaBackend(t, nil)
 
 	// Get the backend
-	b, diags := m.Backend(&BackendOpts{Init: true})
+	b, diags := m.Backend(&BackendOpts{Init: true}, encryption.StateEncryptionDisabled())
 	if diags.HasErrors() {
 		t.Fatal(diags.Err())
 	}
+
+	// Check the state
+	s, err := b.StateMgr(backend.DefaultStateName)
+	if err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	if err := s.RefreshState(); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	state := s.State()
+	if state == nil {
+		t.Fatal("nil state")
+	}
+	if testStateMgrCurrentLineage(s) != "configuredUnchanged" {
+		t.Fatalf("bad: %#v", state)
+	}
+
+	// Verify the default paths don't exist
+	if _, err := os.Stat(DefaultStateFilename); err == nil {
+		t.Fatal("file should not exist")
+	}
+
+	// Verify a backup doesn't exist
+	if _, err := os.Stat(DefaultStateFilename + DefaultBackupExtension); err == nil {
+		t.Fatal("file should not exist")
+	}
+}
+
+// Saved backend state matching config when the configuration uses static eval references
+// and there's an argument overridden on the commandl ine.
+func TestMetaBackend_configuredUnchangedWithStaticEvalVars(t *testing.T) {
+	// This test is covering the fix for the following issue:
+	// https://github.com/opentofu/opentofu/issues/2024
+	//
+	// To match that issue's reproduction case the following must both be true:
+	// - The configuration written in the fixture's .tf file must include either a
+	//   reference to a named value or a function call. Currently we use a reference
+	//   to a variable.
+	// - There must be at least one -backend-config argument on the command line,
+	//   which causes us to go into the trickier comparison codepath that has to
+	//   re-evaluate _just_ the configuration to distinguish from the combined
+	//   configuration plus command-line overrides. Without this the configuration
+	//   doesn't get re-evaluated and so the expressions used to construct it are
+	//   irrelevant.
+	//
+	// Although not strictly required for reproduction at the time of writing this
+	// test, the local-state.tfstate file in the fixture also includes an output
+	// value to ensure that it can't be classified as an "empty state" and thus
+	// have migration skipped, even if the rules for activating that fast path
+	// change in future.
+
+	defer testChdir(t, testFixturePath("backend-unchanged-vars"))()
+
+	// We'll use a mock backend here because we need to control the schema to
+	// make sure that we always have a required field for the ConfigOverride
+	// argument to populate. This is covering the regression caused by the first
+	// fix to the original bug, discussed here:
+	//    https://github.com/opentofu/opentofu/issues/2118
+	t.Cleanup(
+		backendInit.RegisterTemp("_test_local", func(enc encryption.StateEncryption) backend.Backend {
+			return &backendInit.MockBackend{
+				ConfigSchemaFn: func() *configschema.Block {
+					// The following is based on a subset of the normal "local"
+					// backend at the time of writing this test, but subsetted
+					// to only what we need and with all of the arguments
+					// marked as required (even though the real backend doesn't)
+					// so we can make sure that we handle required arguments
+					// properly.
+					return &configschema.Block{
+						Attributes: map[string]*configschema.Attribute{
+							"path": {
+								Type:     cty.String,
+								Required: true,
+								// We'll set this one in the root module, using early eval.
+							},
+							"workspace_dir": {
+								Type:     cty.String,
+								Required: true,
+								// We'll treat this one as if it were set with the -backend-config option to "tofu init"
+							},
+						},
+					}
+				},
+				WorkspacesFn: func() ([]string, error) {
+					return []string{"default"}, nil
+				},
+				StateMgrFn: func(workspace string) (statemgr.Full, error) {
+					// The migration-detection code actually fetches the state to
+					// decide if it's "empty" so it can avoid proposing to migrate
+					// an empty state, and so unfortunately we do need to have
+					// a relatively-realistic implementation of this. We'll
+					// just use the same filesystem-based implementation that
+					// the real local backend would use, but fixed to use our
+					// local-state.tfstate file from the test fixture.
+					return statemgr.NewFilesystem("local-state.tfstate", enc), nil
+				},
+			}
+		}),
+	)
+
+	// Setup the meta
+	m := testMetaBackend(t, nil)
+	// testMetaBackend normally sets migrateState on, because most of the tests
+	// _want_ to perform migration, but for this one we're behaving as if the
+	// user hasn't set the -migrate-state option and thus it should be an error
+	// if state migration is required.
+	m.migrateState = false
+
+	// Get the backend
+	b, diags := m.Backend(
+		&BackendOpts{
+			Init: true,
+
+			// ConfigOverride is the internal representation of the -backend-config
+			// command line options. In the normal codepath this gets built into
+			// a synthetic hcl.Body so it can be merged with the real hcl.Body
+			// for evaluation. For testing purposes here we're constructing the
+			// synthetic body using the hcltest package instead, but the effect
+			// is the same.
+			ConfigOverride: hcltest.MockBody(&hcl.BodyContent{
+				Attributes: hcl.Attributes{
+					"workspace_dir": {
+						Name: "workspace_dir",
+						// We're using the "default" workspace in this test and so the workspace_dir
+						// isn't actually significant -- we're setting it only to enter the full-evaluation
+						// codepath. The only thing that matters is that the value here matches the
+						// argument value stored in the .terraform/terraform.tfstate file in the
+						// test fixture, meaning that state migration is not required because the
+						// configuration is unchanged.
+						Expr: hcltest.MockExprLiteral(cty.StringVal("doesnt-actually-matter-what-this-is")),
+					},
+				},
+			}),
+		},
+		encryption.StateEncryptionDisabled(),
+	)
+	if diags.HasErrors() {
+		// The original problem reported in https://github.com/opentofu/opentofu/issues/2024
+		// would return an error here: "Backend configuration has changed".
+		t.Fatal(diags.Err())
+	}
+
+	// The remaining checks are not directly related to the issue that this test
+	// is covering, but are included for completeness to check that this situation
+	// also follows the usual invariants for a failed backend init.
 
 	// Check the state
 	s, err := b.StateMgr(backend.DefaultStateName)
@@ -666,7 +817,7 @@ func TestMetaBackend_configuredChange(t *testing.T) {
 	m := testMetaBackend(t, nil)
 
 	// Get the backend
-	b, diags := m.Backend(&BackendOpts{Init: true})
+	b, diags := m.Backend(&BackendOpts{Init: true}, encryption.StateEncryptionDisabled())
 	if diags.HasErrors() {
 		t.Fatal(diags.Err())
 	}
@@ -709,7 +860,7 @@ func TestMetaBackend_configuredChange(t *testing.T) {
 		if err != nil {
 			t.Fatalf("err: %s", err)
 		}
-		actual, err := statefile.Read(f)
+		actual, err := statefile.Read(f, encryption.StateEncryptionDisabled())
 		f.Close()
 		if err != nil {
 			t.Fatalf("err: %s", err)
@@ -752,7 +903,7 @@ func TestMetaBackend_reconfigureChange(t *testing.T) {
 	m.reconfigure = true
 
 	// Get the backend
-	b, diags := m.Backend(&BackendOpts{Init: true})
+	b, diags := m.Backend(&BackendOpts{Init: true}, encryption.StateEncryptionDisabled())
 	if diags.HasErrors() {
 		t.Fatal(diags.Err())
 	}
@@ -771,7 +922,7 @@ func TestMetaBackend_reconfigureChange(t *testing.T) {
 	}
 
 	// verify that the old state is still there
-	s = statemgr.NewFilesystem("local-state.tfstate")
+	s = statemgr.NewFilesystem("local-state.tfstate", encryption.StateEncryptionDisabled())
 	if err := s.RefreshState(); err != nil {
 		t.Fatal(err)
 	}
@@ -799,7 +950,7 @@ func TestMetaBackend_initSelectedWorkspaceDoesNotExist(t *testing.T) {
 	})()
 
 	// Get the backend
-	_, diags := m.Backend(&BackendOpts{Init: true})
+	_, diags := m.Backend(&BackendOpts{Init: true}, encryption.StateEncryptionDisabled())
 	if diags.HasErrors() {
 		t.Fatal(diags.Err())
 	}
@@ -841,7 +992,7 @@ func TestMetaBackend_initSelectedWorkspaceDoesNotExistAutoSelect(t *testing.T) {
 	}
 
 	// Get the backend
-	_, diags := m.Backend(&BackendOpts{Init: true})
+	_, diags := m.Backend(&BackendOpts{Init: true}, encryption.StateEncryptionDisabled())
 	if diags.HasErrors() {
 		t.Fatal(diags.Err())
 	}
@@ -870,7 +1021,7 @@ func TestMetaBackend_initSelectedWorkspaceDoesNotExistInputFalse(t *testing.T) {
 	m.input = false
 
 	// Get the backend
-	_, diags := m.Backend(&BackendOpts{Init: true})
+	_, diags := m.Backend(&BackendOpts{Init: true}, encryption.StateEncryptionDisabled())
 
 	// Should fail immediately
 	if got, want := diags.ErrWithWarnings().Error(), `Currently selected workspace "bar" does not exist`; !strings.Contains(got, want) {
@@ -892,7 +1043,7 @@ func TestMetaBackend_configuredChangeCopy(t *testing.T) {
 	m := testMetaBackend(t, nil)
 
 	// Get the backend
-	b, diags := m.Backend(&BackendOpts{Init: true})
+	b, diags := m.Backend(&BackendOpts{Init: true}, encryption.StateEncryptionDisabled())
 	if diags.HasErrors() {
 		t.Fatal(diags.Err())
 	}
@@ -945,7 +1096,7 @@ func TestMetaBackend_configuredChangeCopy_singleState(t *testing.T) {
 	m := testMetaBackend(t, nil)
 
 	// Get the backend
-	b, diags := m.Backend(&BackendOpts{Init: true})
+	b, diags := m.Backend(&BackendOpts{Init: true}, encryption.StateEncryptionDisabled())
 	if diags.HasErrors() {
 		t.Fatal(diags.Err())
 	}
@@ -999,7 +1150,7 @@ func TestMetaBackend_configuredChangeCopy_multiToSingleDefault(t *testing.T) {
 	m := testMetaBackend(t, nil)
 
 	// Get the backend
-	b, diags := m.Backend(&BackendOpts{Init: true})
+	b, diags := m.Backend(&BackendOpts{Init: true}, encryption.StateEncryptionDisabled())
 	if diags.HasErrors() {
 		t.Fatal(diags.Err())
 	}
@@ -1053,7 +1204,7 @@ func TestMetaBackend_configuredChangeCopy_multiToSingle(t *testing.T) {
 	m := testMetaBackend(t, nil)
 
 	// Get the backend
-	b, diags := m.Backend(&BackendOpts{Init: true})
+	b, diags := m.Backend(&BackendOpts{Init: true}, encryption.StateEncryptionDisabled())
 	if diags.HasErrors() {
 		t.Fatal(diags.Err())
 	}
@@ -1127,7 +1278,7 @@ func TestMetaBackend_configuredChangeCopy_multiToSingleCurrentEnv(t *testing.T) 
 	}
 
 	// Get the backend
-	b, diags := m.Backend(&BackendOpts{Init: true})
+	b, diags := m.Backend(&BackendOpts{Init: true}, encryption.StateEncryptionDisabled())
 	if diags.HasErrors() {
 		t.Fatal(diags.Err())
 	}
@@ -1182,7 +1333,7 @@ func TestMetaBackend_configuredChangeCopy_multiToMulti(t *testing.T) {
 	m := testMetaBackend(t, nil)
 
 	// Get the backend
-	b, diags := m.Backend(&BackendOpts{Init: true})
+	b, diags := m.Backend(&BackendOpts{Init: true}, encryption.StateEncryptionDisabled())
 	if diags.HasErrors() {
 		t.Fatal(diags.Err())
 	}
@@ -1280,7 +1431,7 @@ func TestMetaBackend_configuredChangeCopy_multiToNoDefaultWithDefault(t *testing
 	m := testMetaBackend(t, nil)
 
 	// Get the backend
-	b, diags := m.Backend(&BackendOpts{Init: true})
+	b, diags := m.Backend(&BackendOpts{Init: true}, encryption.StateEncryptionDisabled())
 	if diags.HasErrors() {
 		t.Fatal(diags.Err())
 	}
@@ -1354,7 +1505,7 @@ func TestMetaBackend_configuredChangeCopy_multiToNoDefaultWithoutDefault(t *test
 	m := testMetaBackend(t, nil)
 
 	// Get the backend
-	b, diags := m.Backend(&BackendOpts{Init: true})
+	b, diags := m.Backend(&BackendOpts{Init: true}, encryption.StateEncryptionDisabled())
 	if diags.HasErrors() {
 		t.Fatal(diags.Err())
 	}
@@ -1420,7 +1571,7 @@ func TestMetaBackend_configuredUnset(t *testing.T) {
 	m := testMetaBackend(t, nil)
 
 	// Get the backend
-	b, diags := m.Backend(&BackendOpts{Init: true})
+	b, diags := m.Backend(&BackendOpts{Init: true}, encryption.StateEncryptionDisabled())
 	if diags.HasErrors() {
 		t.Fatal(diags.Err())
 	}
@@ -1482,7 +1633,7 @@ func TestMetaBackend_configuredUnsetCopy(t *testing.T) {
 	m := testMetaBackend(t, nil)
 
 	// Get the backend
-	b, diags := m.Backend(&BackendOpts{Init: true})
+	b, diags := m.Backend(&BackendOpts{Init: true}, encryption.StateEncryptionDisabled())
 	if diags.HasErrors() {
 		t.Fatal(diags.Err())
 	}
@@ -1550,7 +1701,7 @@ func TestMetaBackend_planLocal(t *testing.T) {
 	m := testMetaBackend(t, nil)
 
 	// Get the backend
-	b, diags := m.BackendForLocalPlan(backendConfig)
+	b, diags := m.BackendForLocalPlan(backendConfig, encryption.StateEncryptionDisabled())
 	if diags.HasErrors() {
 		t.Fatal(diags.Err())
 	}
@@ -1599,7 +1750,7 @@ func TestMetaBackend_planLocal(t *testing.T) {
 		if err != nil {
 			t.Fatalf("err: %s", err)
 		}
-		actual, err := statefile.Read(f)
+		actual, err := statefile.Read(f, encryption.StateEncryptionDisabled())
 		f.Close()
 		if err != nil {
 			t.Fatalf("err: %s", err)
@@ -1641,7 +1792,7 @@ func TestMetaBackend_planLocalStatePath(t *testing.T) {
 	statePath := "foo.tfstate"
 
 	// put an initial state there that needs to be backed up
-	err = (statemgr.NewFilesystem(statePath)).WriteState(original)
+	err = statemgr.WriteAndPersist(statemgr.NewFilesystem(statePath, encryption.StateEncryptionDisabled()), original, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1651,7 +1802,7 @@ func TestMetaBackend_planLocalStatePath(t *testing.T) {
 	m.stateOutPath = statePath
 
 	// Get the backend
-	b, diags := m.BackendForLocalPlan(plannedBackend)
+	b, diags := m.BackendForLocalPlan(plannedBackend, encryption.StateEncryptionDisabled())
 	if diags.HasErrors() {
 		t.Fatal(diags.Err())
 	}
@@ -1700,7 +1851,7 @@ func TestMetaBackend_planLocalStatePath(t *testing.T) {
 		if err != nil {
 			t.Fatalf("err: %s", err)
 		}
-		actual, err := statefile.Read(f)
+		actual, err := statefile.Read(f, encryption.StateEncryptionDisabled())
 		f.Close()
 		if err != nil {
 			t.Fatalf("err: %s", err)
@@ -1740,7 +1891,7 @@ func TestMetaBackend_planLocalMatch(t *testing.T) {
 	m := testMetaBackend(t, nil)
 
 	// Get the backend
-	b, diags := m.BackendForLocalPlan(backendConfig)
+	b, diags := m.BackendForLocalPlan(backendConfig, encryption.StateEncryptionDisabled())
 	if diags.HasErrors() {
 		t.Fatal(diags.Err())
 	}
@@ -1787,7 +1938,7 @@ func TestMetaBackend_planLocalMatch(t *testing.T) {
 		if err != nil {
 			t.Fatalf("err: %s", err)
 		}
-		actual, err := statefile.Read(f)
+		actual, err := statefile.Read(f, encryption.StateEncryptionDisabled())
 		f.Close()
 		if err != nil {
 			t.Fatalf("err: %s", err)
@@ -1825,7 +1976,7 @@ func TestMetaBackend_configureWithExtra(t *testing.T) {
 	_, diags := m.Backend(&BackendOpts{
 		ConfigOverride: configs.SynthBody("synth", extras),
 		Init:           true,
-	})
+	}, encryption.StateEncryptionDisabled())
 	if diags.HasErrors() {
 		t.Fatal(diags.Err())
 	}
@@ -1841,7 +1992,7 @@ func TestMetaBackend_configureWithExtra(t *testing.T) {
 	_, err = m.Backend(&BackendOpts{
 		ConfigOverride: configs.SynthBody("synth", extras),
 		Init:           true,
-	})
+	}, encryption.StateEncryptionDisabled())
 	if err != nil {
 		t.Fatalf("unexpected error: %s", err)
 	}
@@ -1868,7 +2019,7 @@ func TestMetaBackend_localDoesNotDeleteLocal(t *testing.T) {
 	m := testMetaBackend(t, nil)
 	m.forceInitCopy = true
 	// init the backend
-	_, diags := m.Backend(&BackendOpts{Init: true})
+	_, diags := m.Backend(&BackendOpts{Init: true}, encryption.StateEncryptionDisabled())
 	if diags.HasErrors() {
 		t.Fatal(diags.Err())
 	}
@@ -1891,7 +2042,7 @@ func TestMetaBackend_configToExtra(t *testing.T) {
 	m := testMetaBackend(t, nil)
 	_, err := m.Backend(&BackendOpts{
 		Init: true,
-	})
+	}, encryption.StateEncryptionDisabled())
 	if err != nil {
 		t.Fatalf("unexpected error: %s", err)
 	}
@@ -1913,7 +2064,7 @@ func TestMetaBackend_configToExtra(t *testing.T) {
 	_, diags := m.Backend(&BackendOpts{
 		ConfigOverride: configs.SynthBody("synth", extras),
 		Init:           true,
-	})
+	}, encryption.StateEncryptionDisabled())
 	if diags.HasErrors() {
 		t.Fatal(diags.Err())
 	}
@@ -1940,7 +2091,7 @@ func TestBackendFromState(t *testing.T) {
 	// them to match just for this test.
 	wd.OverrideDataDir(".")
 
-	stateBackend, diags := m.backendFromState(context.Background())
+	stateBackend, diags := m.backendFromState(context.Background(), encryption.StateEncryptionDisabled())
 	if diags.HasErrors() {
 		t.Fatal(diags.Err())
 	}

@@ -1,4 +1,6 @@
-// Copyright (c) HashiCorp, Inc.
+// Copyright (c) The OpenTofu Authors
+// SPDX-License-Identifier: MPL-2.0
+// Copyright (c) 2023 HashiCorp, Inc.
 // SPDX-License-Identifier: MPL-2.0
 
 package initwd
@@ -7,6 +9,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -21,7 +24,7 @@ import (
 
 func TestDirFromModule_registry(t *testing.T) {
 	if os.Getenv("TF_ACC") == "" {
-		t.Skip("this test accesses registry.terraform.io and github.com; set TF_ACC=1 to run it")
+		t.Skip("this test accesses registry.opentofu.org and github.com; set TF_ACC=1 to run it")
 	}
 
 	fixtureDir := filepath.Clean("testdata/empty")
@@ -62,7 +65,7 @@ func TestDirFromModule_registry(t *testing.T) {
 		{
 			Name:        "Download",
 			ModuleAddr:  "root",
-			PackageAddr: "registry.terraform.io/hashicorp/module-installer-acctest/aws",
+			PackageAddr: "registry.opentofu.org/hashicorp/module-installer-acctest/aws",
 			Version:     v,
 		},
 		{
@@ -71,7 +74,7 @@ func TestDirFromModule_registry(t *testing.T) {
 			Version:    v,
 			// NOTE: This local path and the other paths derived from it below
 			// can vary depending on how the registry is implemented. At the
-			// time of writing this test, registry.terraform.io returns
+			// time of writing this test, registry.opentofu.org returns
 			// git repository source addresses and so this path refers to the
 			// root of the git clone, but historically the registry referred
 			// to GitHub-provided tar archives which meant that there was an
@@ -107,7 +110,7 @@ func TestDirFromModule_registry(t *testing.T) {
 
 	// Make sure the configuration is loadable now.
 	// (This ensures that correct information is recorded in the manifest.)
-	config, loadDiags := loader.LoadConfig(".")
+	config, loadDiags := loader.LoadConfig(".", configs.RootModuleCallForTesting())
 	if assertNoDiagnostics(t, tfdiags.Diagnostics{}.Append(loadDiags)) {
 		return
 	}
@@ -189,7 +192,7 @@ func TestDirFromModule_submodules(t *testing.T) {
 
 	// Make sure the configuration is loadable now.
 	// (This ensures that correct information is recorded in the manifest.)
-	config, loadDiags := loader.LoadConfig(".")
+	config, loadDiags := loader.LoadConfig(".", configs.RootModuleCallForTesting())
 	if assertNoDiagnostics(t, tfdiags.Diagnostics{}.Append(loadDiags)) {
 		return
 	}
@@ -279,6 +282,11 @@ func TestDirFromModule_rel_submodules(t *testing.T) {
 	}
 	t.Cleanup(func() {
 		os.Chdir(oldDir)
+		// Trigger garbage collection to ensure that all open file handles are closed.
+		// This prevents TempDir RemoveAll cleanup errors on Windows.
+		if runtime.GOOS == "windows" {
+			runtime.GC()
+		}
 	})
 
 	hooks := &testInstallHooks{}
@@ -315,7 +323,7 @@ func TestDirFromModule_rel_submodules(t *testing.T) {
 
 	// Make sure the configuration is loadable now.
 	// (This ensures that correct information is recorded in the manifest.)
-	config, loadDiags := loader.LoadConfig(".")
+	config, loadDiags := loader.LoadConfig(".", configs.RootModuleCallForTesting())
 	if assertNoDiagnostics(t, tfdiags.Diagnostics{}.Append(loadDiags)) {
 		return
 	}

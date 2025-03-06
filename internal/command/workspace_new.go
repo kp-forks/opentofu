@@ -1,4 +1,6 @@
-// Copyright (c) HashiCorp, Inc.
+// Copyright (c) The OpenTofu Authors
+// SPDX-License-Identifier: MPL-2.0
+// Copyright (c) 2023 HashiCorp, Inc.
 // SPDX-License-Identifier: MPL-2.0
 
 package command
@@ -15,6 +17,7 @@ import (
 	"github.com/opentofu/opentofu/internal/command/arguments"
 	"github.com/opentofu/opentofu/internal/command/clistate"
 	"github.com/opentofu/opentofu/internal/command/views"
+	"github.com/opentofu/opentofu/internal/encryption"
 	"github.com/opentofu/opentofu/internal/states/statefile"
 	"github.com/opentofu/opentofu/internal/tfdiags"
 )
@@ -32,6 +35,7 @@ func (c *WorkspaceNewCommand) Run(args []string) int {
 	var stateLockTimeout time.Duration
 	var statePath string
 	cmdFlags := c.Meta.defaultFlagSet("workspace new")
+	c.Meta.varFlagSet(cmdFlags)
 	cmdFlags.BoolVar(&stateLock, "lock", true, "lock state")
 	cmdFlags.DurationVar(&stateLockTimeout, "lock-timeout", 0, "lock timeout")
 	cmdFlags.StringVar(&statePath, "state", "", "tofu state file")
@@ -61,7 +65,7 @@ func (c *WorkspaceNewCommand) Run(args []string) int {
 		return 1
 	}
 
-	configPath, err := ModulePath(args[1:])
+	configPath, err := modulePath(args[1:])
 	if err != nil {
 		c.Ui.Error(err.Error())
 		return 1
@@ -76,10 +80,18 @@ func (c *WorkspaceNewCommand) Run(args []string) int {
 		return 1
 	}
 
+	// Load the encryption configuration
+	enc, encDiags := c.EncryptionFromPath(configPath)
+	diags = diags.Append(encDiags)
+	if encDiags.HasErrors() {
+		c.showDiagnostics(diags)
+		return 1
+	}
+
 	// Load the backend
 	b, backendDiags := c.Backend(&BackendOpts{
 		Config: backendConfig,
-	})
+	}, enc.State())
 	diags = diags.Append(backendDiags)
 	if backendDiags.HasErrors() {
 		c.showDiagnostics(diags)
@@ -148,7 +160,7 @@ func (c *WorkspaceNewCommand) Run(args []string) int {
 		return 1
 	}
 
-	stateFile, err := statefile.Read(f)
+	stateFile, err := statefile.Read(f, encryption.StateEncryptionDisabled()) // Assume given statefile is not encrypted
 	if err != nil {
 		c.Ui.Error(err.Error())
 		return 1
@@ -198,6 +210,15 @@ Options:
 
     -state=path         Copy an existing state file into the new workspace.
 
+
+    -var 'foo=bar'      Set a value for one of the input variables in the root
+                        module of the configuration. Use this option more than
+                        once to set more than one variable.
+
+    -var-file=filename  Load variable values from the given file, in addition
+                        to the default files terraform.tfvars and *.auto.tfvars.
+                        Use this option more than once to include more than one
+                        variables file.
 `
 	return strings.TrimSpace(helpText)
 }

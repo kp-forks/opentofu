@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# Copyright (c) HashiCorp, Inc.
+# Copyright (c) The OpenTofu Authors
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) 2023 HashiCorp, Inc.
 # SPDX-License-Identifier: MPL-2.0
 
 #
@@ -59,7 +61,7 @@ gox \
     -osarch="${XC_EXCLUDE_OSARCH}" \
     -ldflags "${LD_FLAGS}" \
     -output "pkg/{{.OS}}_{{.Arch}}/tofu" \
-    .
+    ./cmd/tofu
 
 # Move all the compiled things to the $GOPATH/bin
 GOPATH=${GOPATH:-$(go env GOPATH)}

@@ -1,4 +1,6 @@
-// Copyright (c) HashiCorp, Inc.
+// Copyright (c) The OpenTofu Authors
+// SPDX-License-Identifier: MPL-2.0
+// Copyright (c) 2023 HashiCorp, Inc.
 // SPDX-License-Identifier: MPL-2.0
 
 package tofu
@@ -27,6 +29,30 @@ func testProviderTransformerGraph(t *testing.T, cfg *configs.Config) *Graph {
 	}
 
 	return g
+}
+
+// This variant exists purely for testing and can not currently include the ProviderFunctionTransformer
+func testTransformProviders(concrete ConcreteProviderNodeFunc, config *configs.Config) GraphTransformer {
+	return GraphTransformMulti(
+		// Add providers from the config
+		&ProviderConfigTransformer{
+			Config:   config,
+			Concrete: concrete,
+		},
+		// Add any remaining missing providers
+		&MissingProviderTransformer{
+			Config:   config,
+			Concrete: concrete,
+		},
+		// Connect the providers
+		&ProviderTransformer{
+			Config: config,
+		},
+		// After schema transformer, we can add function references
+		//  &ProviderFunctionTransformer{Config: config},
+		// Remove unused providers and proxies
+		&PruneProviderTransformer{},
+	)
 }
 
 func TestProviderTransformer(t *testing.T) {
@@ -118,10 +144,40 @@ func TestCloseProviderTransformer_withTargets(t *testing.T) {
 		&MissingProviderTransformer{},
 		&ProviderTransformer{},
 		&CloseProviderTransformer{},
-		&TargetsTransformer{
+		&TargetingTransformer{
 			Targets: []addrs.Targetable{
 				addrs.RootModuleInstance.Resource(
 					addrs.ManagedResourceMode, "something", "else",
+				),
+			},
+		},
+	}
+
+	for _, tr := range transforms {
+		if err := tr.Transform(g); err != nil {
+			t.Fatalf("err: %s", err)
+		}
+	}
+
+	actual := strings.TrimSpace(g.String())
+	expected := strings.TrimSpace(``)
+	if actual != expected {
+		t.Fatalf("expected:%s\n\ngot:\n\n%s", expected, actual)
+	}
+}
+
+func TestCloseProviderTransformer_withExcludes(t *testing.T) {
+	mod := testModule(t, "transform-provider-basic")
+
+	g := testProviderTransformerGraph(t, mod)
+	transforms := []GraphTransformer{
+		&MissingProviderTransformer{},
+		&ProviderTransformer{},
+		&CloseProviderTransformer{},
+		&TargetingTransformer{
+			Excludes: []addrs.Targetable{
+				addrs.RootModuleInstance.Resource(
+					addrs.ManagedResourceMode, "aws_instance", "web",
 				),
 			},
 		},
@@ -179,7 +235,7 @@ func TestMissingProviderTransformer_grandchildMissing(t *testing.T) {
 
 	g := testProviderTransformerGraph(t, mod)
 	{
-		transform := transformProviders(concrete, mod)
+		transform := testTransformProviders(concrete, mod)
 		if err := transform.Transform(g); err != nil {
 			t.Fatalf("err: %s", err)
 		}
@@ -244,7 +300,7 @@ func TestProviderConfigTransformer_parentProviders(t *testing.T) {
 
 	g := testProviderTransformerGraph(t, mod)
 	{
-		tf := transformProviders(concrete, mod)
+		tf := testTransformProviders(concrete, mod)
 		if err := tf.Transform(g); err != nil {
 			t.Fatalf("err: %s", err)
 		}
@@ -264,7 +320,7 @@ func TestProviderConfigTransformer_grandparentProviders(t *testing.T) {
 
 	g := testProviderTransformerGraph(t, mod)
 	{
-		tf := transformProviders(concrete, mod)
+		tf := testTransformProviders(concrete, mod)
 		if err := tf.Transform(g); err != nil {
 			t.Fatalf("err: %s", err)
 		}
@@ -298,15 +354,15 @@ resource "test_object" "a" {
 
 	g := testProviderTransformerGraph(t, mod)
 	{
-		tf := transformProviders(concrete, mod)
+		tf := testTransformProviders(concrete, mod)
 		if err := tf.Transform(g); err != nil {
 			t.Fatalf("err: %s", err)
 		}
 	}
 
 	expected := `module.moda.test_object.a
-  provider["registry.terraform.io/hashicorp/test"]
-provider["registry.terraform.io/hashicorp/test"]`
+  provider["registry.opentofu.org/hashicorp/test"]
+provider["registry.opentofu.org/hashicorp/test"]`
 
 	actual := strings.TrimSpace(g.String())
 	if actual != expected {
@@ -321,7 +377,7 @@ func TestProviderConfigTransformer_nestedModuleProviders(t *testing.T) {
 terraform {
   required_providers {
     test = {
-      source = "registry.terraform.io/hashicorp/test"
+      source = "registry.opentofu.org/hashicorp/test"
 	}
   }
 }
@@ -343,7 +399,7 @@ module "moda" {
 terraform {
   required_providers {
     test = {
-      source = "registry.terraform.io/hashicorp/test"
+      source = "registry.opentofu.org/hashicorp/test"
       configuration_aliases = [ test.x ]
 	}
   }
@@ -376,20 +432,20 @@ resource "test_object" "a" {
 
 	g := testProviderTransformerGraph(t, mod)
 	{
-		tf := transformProviders(concrete, mod)
+		tf := testTransformProviders(concrete, mod)
 		if err := tf.Transform(g); err != nil {
 			t.Fatalf("err: %s", err)
 		}
 	}
 
 	expected := `module.moda.module.modb.test_object.a
-  module.moda.provider["registry.terraform.io/hashicorp/test"]
-module.moda.provider["registry.terraform.io/hashicorp/test"]
+  module.moda.provider["registry.opentofu.org/hashicorp/test"]
+module.moda.provider["registry.opentofu.org/hashicorp/test"]
 module.moda.test_object.a
-  module.moda.provider["registry.terraform.io/hashicorp/test"]
+  module.moda.provider["registry.opentofu.org/hashicorp/test"]
 module.moda.test_object.x
-  provider["registry.terraform.io/hashicorp/test"].z
-provider["registry.terraform.io/hashicorp/test"].z`
+  provider["registry.opentofu.org/hashicorp/test"].z
+provider["registry.opentofu.org/hashicorp/test"].z`
 
 	actual := strings.TrimSpace(g.String())
 	if actual != expected {
@@ -406,7 +462,7 @@ terraform {
 	# default config is equivalent to the provider config, the user may never
 	# see an error.
     dupe = {
-      source = "registry.terraform.io/hashicorp/test"
+      source = "registry.opentofu.org/hashicorp/test"
     }
   }
 }
@@ -425,7 +481,7 @@ provider "test" {
 		t.Fatalf("err: %s", err)
 	}
 
-	expected := `provider["registry.terraform.io/hashicorp/test"]`
+	expected := `provider["registry.opentofu.org/hashicorp/test"]`
 
 	actual := strings.TrimSpace(g.String())
 	if actual != expected {
@@ -435,60 +491,60 @@ provider "test" {
 
 const testTransformProviderBasicStr = `
 aws_instance.web
-  provider["registry.terraform.io/hashicorp/aws"]
-provider["registry.terraform.io/hashicorp/aws"]
+  provider["registry.opentofu.org/hashicorp/aws"]
+provider["registry.opentofu.org/hashicorp/aws"]
 `
 
 const testTransformCloseProviderBasicStr = `
 aws_instance.web
-  provider["registry.terraform.io/hashicorp/aws"]
-provider["registry.terraform.io/hashicorp/aws"]
-provider["registry.terraform.io/hashicorp/aws"] (close)
+  provider["registry.opentofu.org/hashicorp/aws"]
+provider["registry.opentofu.org/hashicorp/aws"]
+provider["registry.opentofu.org/hashicorp/aws"] (close)
   aws_instance.web
-  provider["registry.terraform.io/hashicorp/aws"]
+  provider["registry.opentofu.org/hashicorp/aws"]
 `
 
 const testTransformMissingProviderBasicStr = `
 aws_instance.web
-  provider["registry.terraform.io/hashicorp/aws"]
+  provider["registry.opentofu.org/hashicorp/aws"]
 foo_instance.web
-  provider["registry.terraform.io/hashicorp/foo"]
-provider["registry.terraform.io/hashicorp/aws"]
-provider["registry.terraform.io/hashicorp/aws"] (close)
+  provider["registry.opentofu.org/hashicorp/foo"]
+provider["registry.opentofu.org/hashicorp/aws"]
+provider["registry.opentofu.org/hashicorp/aws"] (close)
   aws_instance.web
-  provider["registry.terraform.io/hashicorp/aws"]
-provider["registry.terraform.io/hashicorp/foo"]
-provider["registry.terraform.io/hashicorp/foo"] (close)
+  provider["registry.opentofu.org/hashicorp/aws"]
+provider["registry.opentofu.org/hashicorp/foo"]
+provider["registry.opentofu.org/hashicorp/foo"] (close)
   foo_instance.web
-  provider["registry.terraform.io/hashicorp/foo"]
+  provider["registry.opentofu.org/hashicorp/foo"]
 `
 
 const testTransformMissingGrandchildProviderStr = `
 module.sub.module.subsub.bar_instance.two
-  provider["registry.terraform.io/hashicorp/bar"]
+  provider["registry.opentofu.org/hashicorp/bar"]
 module.sub.module.subsub.foo_instance.one
-  module.sub.provider["registry.terraform.io/hashicorp/foo"]
-module.sub.provider["registry.terraform.io/hashicorp/foo"]
-provider["registry.terraform.io/hashicorp/bar"]
+  module.sub.provider["registry.opentofu.org/hashicorp/foo"]
+module.sub.provider["registry.opentofu.org/hashicorp/foo"]
+provider["registry.opentofu.org/hashicorp/bar"]
 `
 
 const testTransformPruneProviderBasicStr = `
 foo_instance.web
-  provider["registry.terraform.io/hashicorp/foo"]
-provider["registry.terraform.io/hashicorp/foo"]
-provider["registry.terraform.io/hashicorp/foo"] (close)
+  provider["registry.opentofu.org/hashicorp/foo"]
+provider["registry.opentofu.org/hashicorp/foo"]
+provider["registry.opentofu.org/hashicorp/foo"] (close)
   foo_instance.web
-  provider["registry.terraform.io/hashicorp/foo"]
+  provider["registry.opentofu.org/hashicorp/foo"]
 `
 
 const testTransformModuleProviderConfigStr = `
 module.child.aws_instance.thing
-  provider["registry.terraform.io/hashicorp/aws"].foo
-provider["registry.terraform.io/hashicorp/aws"].foo
+  provider["registry.opentofu.org/hashicorp/aws"].foo
+provider["registry.opentofu.org/hashicorp/aws"].foo
 `
 
 const testTransformModuleProviderGrandparentStr = `
 module.child.module.grandchild.aws_instance.baz
-  provider["registry.terraform.io/hashicorp/aws"].foo
-provider["registry.terraform.io/hashicorp/aws"].foo
+  provider["registry.opentofu.org/hashicorp/aws"].foo
+provider["registry.opentofu.org/hashicorp/aws"].foo
 `

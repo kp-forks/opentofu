@@ -1,4 +1,6 @@
-// Copyright (c) HashiCorp, Inc.
+// Copyright (c) The OpenTofu Authors
+// SPDX-License-Identifier: MPL-2.0
+// Copyright (c) 2023 HashiCorp, Inc.
 // SPDX-License-Identifier: MPL-2.0
 
 package cloud
@@ -27,6 +29,7 @@ import (
 
 	"github.com/opentofu/opentofu/internal/backend/local"
 	"github.com/opentofu/opentofu/internal/command/jsonstate"
+	"github.com/opentofu/opentofu/internal/encryption"
 	"github.com/opentofu/opentofu/internal/states"
 	"github.com/opentofu/opentofu/internal/states/remote"
 	"github.com/opentofu/opentofu/internal/states/statefile"
@@ -34,13 +37,16 @@ import (
 	"github.com/opentofu/opentofu/internal/tofu"
 )
 
+const (
+	// HeaderSnapshotInterval is the header key that controls the snapshot interval
+	HeaderSnapshotInterval = "x-terraform-snapshot-interval"
+)
+
 // State implements the State interfaces in the state package to handle
 // reading and writing the remote state to TFC. This State on its own does no
 // local caching so every persist will go to the remote storage and local
 // writes will go to memory.
 type State struct {
-	mu sync.Mutex
-
 	// We track two pieces of meta data in addition to the state itself:
 	//
 	// lineage - the state's unique ID
@@ -52,6 +58,7 @@ type State struct {
 	// state has changed from an existing state we read in.
 	lineage, readLineage string
 	serial, readSerial   uint64
+	mu                   sync.Mutex
 	state, readState     *states.State
 	disableLocks         bool
 	tfeClient            *tfe.Client
@@ -72,6 +79,8 @@ type State struct {
 	// If the header X-Terraform-Snapshot-Interval is present then
 	// we will enable snapshots
 	enableIntermediateSnapshots bool
+
+	encryption encryption.StateEncryption
 }
 
 var ErrStateVersionUnauthorizedUpgradeState = errors.New(strings.TrimSpace(`
@@ -197,7 +206,7 @@ func (s *State) PersistState(schemas *tofu.Schemas) error {
 	f := statefile.New(s.state, s.lineage, s.serial)
 
 	var buf bytes.Buffer
-	err := statefile.Write(f, &buf)
+	err := statefile.Write(f, &buf, s.encryption)
 	if err != nil {
 		return err
 	}
@@ -210,7 +219,7 @@ func (s *State) PersistState(schemas *tofu.Schemas) error {
 		}
 	}
 
-	stateFile, err := statefile.Read(bytes.NewReader(buf.Bytes()))
+	stateFile, err := statefile.Read(bytes.NewReader(buf.Bytes()), s.encryption)
 	if err != nil {
 		return fmt.Errorf("failed to read state: %w", err)
 	}
@@ -248,7 +257,9 @@ func (s *State) ShouldPersistIntermediateState(info *local.IntermediateStatePers
 		return true
 	}
 
-	if !s.enableIntermediateSnapshots && info.RequestedPersistInterval == time.Duration(0) {
+	// This value is controlled by a x-terraform-snapshot-interval header intercepted during
+	// state-versions API responses
+	if !s.enableIntermediateSnapshots {
 		return false
 	}
 
@@ -378,7 +389,7 @@ func (s *State) refreshState() error {
 		return nil
 	}
 
-	stateFile, err := statefile.Read(bytes.NewReader(payload.Data))
+	stateFile, err := statefile.Read(bytes.NewReader(payload.Data), s.encryption)
 	if err != nil {
 		return err
 	}
@@ -577,7 +588,14 @@ func clamp(val, min, max int64) int64 {
 }
 
 func (s *State) readSnapshotIntervalHeader(status int, header http.Header) {
-	intervalStr := header.Get("x-terraform-snapshot-interval")
+	// Only proceed if this came from tfe.v2 API
+	contentType := header.Get("Content-Type")
+	if !strings.Contains(contentType, tfe.ContentTypeJSONAPI) {
+		log.Printf("[TRACE] Skipping intermediate state interval because Content-Type was %q", contentType)
+		return
+	}
+
+	intervalStr := header.Get(HeaderSnapshotInterval)
 
 	if intervalSecs, err := strconv.ParseInt(intervalStr, 10, 64); err == nil {
 		// More than an hour is an unreasonable delay, so we'll just
@@ -588,11 +606,12 @@ func (s *State) readSnapshotIntervalHeader(status int, header http.Header) {
 		// If the header field is either absent or invalid then we'll
 		// just choose zero, which effectively means that we'll just use
 		// the caller's requested interval instead. If the caller has no
-		// requested interval or it is zero, then we will disable snapshots.
+		// requested interval, or it is zero, then we will disable snapshots.
 		s.stateSnapshotInterval = time.Duration(0)
 	}
 
 	// We will only enable snapshots for intervals greater than zero
+	log.Printf("[TRACE] Intermediate state interval is set by header to %v", s.stateSnapshotInterval)
 	s.enableIntermediateSnapshots = s.stateSnapshotInterval > 0
 }
 

@@ -1,4 +1,6 @@
-// Copyright (c) HashiCorp, Inc.
+// Copyright (c) The OpenTofu Authors
+// SPDX-License-Identifier: MPL-2.0
+// Copyright (c) 2023 HashiCorp, Inc.
 // SPDX-License-Identifier: MPL-2.0
 
 package kubernetes
@@ -13,6 +15,7 @@ import (
 
 	"github.com/mitchellh/go-homedir"
 	"github.com/opentofu/opentofu/internal/backend"
+	"github.com/opentofu/opentofu/internal/encryption"
 	"github.com/opentofu/opentofu/internal/httpclient"
 	"github.com/opentofu/opentofu/internal/legacy/helper/schema"
 	"github.com/opentofu/opentofu/version"
@@ -25,16 +28,6 @@ import (
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 )
 
-// Modified from github.com/terraform-providers/terraform-provider-kubernetes
-
-const (
-	noConfigError = `
-
-[Kubernetes backend] Neither service_account nor load_config_file were set to true, 
-this could cause issues connecting to your Kubernetes cluster.
-`
-)
-
 var (
 	secretResource = k8sSchema.GroupVersionResource{
 		Group:    "",
@@ -44,7 +37,7 @@ var (
 )
 
 // New creates a new backend for kubernetes remote state.
-func New() backend.Backend {
+func New(enc encryption.StateEncryption) backend.Backend {
 	s := &schema.Backend{
 		Schema: map[string]*schema.Schema{
 			"secret_suffix": {
@@ -184,13 +177,14 @@ func New() backend.Backend {
 		},
 	}
 
-	result := &Backend{Backend: s}
+	result := &Backend{Backend: s, encryption: enc}
 	result.Backend.ConfigureFunc = result.configure
 	return result
 }
 
 type Backend struct {
 	*schema.Backend
+	encryption encryption.StateEncryption
 
 	// The fields below are set from configure
 	kubernetesSecretClient dynamic.ResourceInterface
@@ -201,7 +195,7 @@ type Backend struct {
 	nameSuffix             string
 }
 
-func (b Backend) KubernetesSecretClient() (dynamic.ResourceInterface, error) {
+func (b Backend) getKubernetesSecretClient() (dynamic.ResourceInterface, error) {
 	if b.kubernetesSecretClient != nil {
 		return b.kubernetesSecretClient, nil
 	}
@@ -215,7 +209,7 @@ func (b Backend) KubernetesSecretClient() (dynamic.ResourceInterface, error) {
 	return b.kubernetesSecretClient, nil
 }
 
-func (b Backend) KubernetesLeaseClient() (coordinationv1.LeaseInterface, error) {
+func (b Backend) getKubernetesLeaseClient() (coordinationv1.LeaseInterface, error) {
 	if b.kubernetesLeaseClient != nil {
 		return b.kubernetesLeaseClient, nil
 	}
@@ -347,7 +341,7 @@ func tryLoadingConfigFile(d *schema.ResourceData) (*restclient.Config, error) {
 	authInfo, authInfoOk := d.GetOk("config_context_auth_info")
 	cluster, clusterOk := d.GetOk("config_context_cluster")
 	if ctxOk || authInfoOk || clusterOk {
-		ctxSuffix = "; overriden context"
+		ctxSuffix = "; overridden context"
 		if ctxOk {
 			overrides.CurrentContext = ctx.(string)
 			ctxSuffix += fmt.Sprintf("; config ctx: %s", overrides.CurrentContext)
@@ -363,7 +357,7 @@ func tryLoadingConfigFile(d *schema.ResourceData) (*restclient.Config, error) {
 			overrides.Context.Cluster = cluster.(string)
 			ctxSuffix += fmt.Sprintf("; cluster: %s", overrides.Context.Cluster)
 		}
-		log.Printf("[DEBUG] Using overidden context: %#v", overrides.Context)
+		log.Printf("[DEBUG] Using overridden context: %#v", overrides.Context)
 	}
 
 	if v, ok := d.GetOk("exec"); ok {
@@ -398,7 +392,7 @@ func tryLoadingConfigFile(d *schema.ResourceData) (*restclient.Config, error) {
 func expandStringSlice(s []interface{}) []string {
 	result := make([]string, len(s), len(s))
 	for k, v := range s {
-		// Handle the Terraform parser bug which turns empty strings in lists to nil.
+		// Handle the OpenTofu parser bug which turns empty strings in lists to nil.
 		if v == nil {
 			result[k] = ""
 		} else {

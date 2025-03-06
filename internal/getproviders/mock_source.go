@@ -108,7 +108,7 @@ func (s *MockSource) PackageMeta(ctx context.Context, provider addrs.Provider, v
 	}
 }
 
-// CallLog returns a list of calls to other methods of the receiever that have
+// CallLog returns a list of calls to other methods of the receiver that have
 // been called since it was created, in case a calling test wishes to verify
 // a particular sequence of operations.
 //
@@ -152,7 +152,7 @@ func FakePackageMeta(provider addrs.Provider, version Version, protocols Version
 // should call the callback even if this function returns an error, because
 // some error conditions leave a partially-created file on disk.
 func FakeInstallablePackageMeta(provider addrs.Provider, version Version, protocols VersionList, target Platform, execFilename string) (PackageMeta, func(), error) {
-	f, err := os.CreateTemp("", "terraform-getproviders-fake-package-")
+	f, err := os.CreateTemp("", "tofu-getproviders-fake-package-")
 	if err != nil {
 		return PackageMeta{}, func() {}, err
 	}
@@ -175,12 +175,12 @@ func FakeInstallablePackageMeta(provider addrs.Provider, version Version, protoc
 	zw := zip.NewWriter(f)
 	fw, err := zw.Create(execFilename)
 	if err != nil {
-		return PackageMeta{}, close, fmt.Errorf("failed to add %s to mock zip file: %s", execFilename, err)
+		return PackageMeta{}, close, fmt.Errorf("failed to add %s to mock zip file: %w", execFilename, err)
 	}
 	fmt.Fprintf(fw, "This is a fake provider package for %s %s, not a real provider.\n", provider, version)
 	err = zw.Close()
 	if err != nil {
-		return PackageMeta{}, close, fmt.Errorf("failed to close the mock zip file: %s", err)
+		return PackageMeta{}, close, fmt.Errorf("failed to close the mock zip file: %w", err)
 	}
 
 	// Compute the SHA256 checksum of the generated file, to allow package

@@ -1,9 +1,12 @@
-// Copyright (c) HashiCorp, Inc.
+// Copyright (c) The OpenTofu Authors
+// SPDX-License-Identifier: MPL-2.0
+// Copyright (c) 2023 HashiCorp, Inc.
 // SPDX-License-Identifier: MPL-2.0
 
 package addrs
 
 import (
+	"runtime"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -11,6 +14,10 @@ import (
 )
 
 func TestParseModuleSource(t *testing.T) {
+
+	absolutePath, absolutePathModulePackage := testDataAbsolutePath()
+	absolutePathSubdir, absolutePathSubdirModulePackage := testDataAbsolutePathSubdir()
+
 	tests := map[string]struct {
 		input   string
 		want    ModuleSource
@@ -63,7 +70,7 @@ func TestParseModuleSource(t *testing.T) {
 			input: "hashicorp/subnets/cidr",
 			want: ModuleSourceRegistry{
 				Package: ModuleRegistryPackage{
-					Host:         svchost.Hostname("registry.terraform.io"),
+					Host:         svchost.Hostname("registry.opentofu.org"),
 					Namespace:    "hashicorp",
 					Name:         "subnets",
 					TargetSystem: "cidr",
@@ -75,7 +82,7 @@ func TestParseModuleSource(t *testing.T) {
 			input: "hashicorp/subnets/cidr//examples/foo",
 			want: ModuleSourceRegistry{
 				Package: ModuleRegistryPackage{
-					Host:         svchost.Hostname("registry.terraform.io"),
+					Host:         svchost.Hostname("registry.opentofu.org"),
 					Namespace:    "hashicorp",
 					Name:         "subnets",
 					TargetSystem: "cidr",
@@ -128,6 +135,27 @@ func TestParseModuleSource(t *testing.T) {
 			input: "github.com/hashicorp/terraform-cidr-subnets//example/foo",
 			want: ModuleSourceRemote{
 				Package: ModulePackage("git::https://github.com/hashicorp/terraform-cidr-subnets.git"),
+				Subdir:  "example/foo",
+			},
+		},
+		"github.com with branch and subdir": {
+			input: "github.com/hashicorp/terraform-cidr-subnets//example/foo?ref=bar",
+			want: ModuleSourceRemote{
+				Package: ModulePackage("git::https://github.com/hashicorp/terraform-cidr-subnets.git?ref=bar"),
+				Subdir:  "example/foo",
+			},
+		},
+		"github.com with subdir and malformed query params": {
+			input: "github.com/hashicorp/terraform-cidr-subnets//example/foo?",
+			want: ModuleSourceRemote{
+				Package: ModulePackage("git::https://github.com/hashicorp/terraform-cidr-subnets.git"),
+				Subdir:  "example/foo",
+			},
+		},
+		"github.com subdir from a branch containing slash in the name": {
+			input: "github.com/hashicorp/terraform-cidr-subnets//example/foo?ref=bar/baz",
+			want: ModuleSourceRemote{
+				Package: ModulePackage("git::https://github.com/hashicorp/terraform-cidr-subnets.git?ref=bar/baz"),
 				Subdir:  "example/foo",
 			},
 		},
@@ -194,7 +222,7 @@ func TestParseModuleSource(t *testing.T) {
 		},
 
 		// NOTE: We intentionally don't test the bitbucket.org shorthands
-		// here, because that detector makes direct HTTP tequests to the
+		// here, because that detector makes direct HTTP requests to the
 		// Bitbucket API and thus isn't appropriate for unit testing.
 
 		"Google Cloud Storage bucket implied, path prefix": {
@@ -268,15 +296,14 @@ func TestParseModuleSource(t *testing.T) {
 				Package: ModulePackage("https://example.com/module?archive=tar&checksum=blah"),
 			},
 		},
-
 		"absolute filesystem path": {
 			// Although a local directory isn't really "remote", we do
 			// treat it as such because we still need to do all of the same
 			// high-level steps to work with these, even though "downloading"
 			// is replaced by a deep filesystem copy instead.
-			input: "/tmp/foo/example",
+			input: absolutePath,
 			want: ModuleSourceRemote{
-				Package: ModulePackage("file:///tmp/foo/example"),
+				Package: ModulePackage(absolutePathModulePackage),
 			},
 		},
 		"absolute filesystem path, subdir": {
@@ -285,9 +312,9 @@ func TestParseModuleSource(t *testing.T) {
 			// multiple modules, but the entry point is not at the root
 			// of that subtree, and so they can use the usual subdir
 			// syntax to move the package root higher in the real filesystem.
-			input: "/tmp/foo//example",
+			input: absolutePathSubdir,
 			want: ModuleSourceRemote{
-				Package: ModulePackage("file:///tmp/foo"),
+				Package: ModulePackage(absolutePathSubdirModulePackage),
 				Subdir:  "example",
 			},
 		},
@@ -362,7 +389,7 @@ func TestModuleSourceRemoteFromRegistry(t *testing.T) {
 		}
 		gotAddr := remote.FromRegistry(registry)
 		if remote.Subdir != "foo" {
-			t.Errorf("FromRegistry modified the reciever; should be pure function")
+			t.Errorf("FromRegistry modified the receiver; should be pure function")
 		}
 		if registry.Subdir != "bar" {
 			t.Errorf("FromRegistry modified the given address; should be pure function")
@@ -381,7 +408,7 @@ func TestModuleSourceRemoteFromRegistry(t *testing.T) {
 		}
 		gotAddr := remote.FromRegistry(registry)
 		if remote.Subdir != "foo" {
-			t.Errorf("FromRegistry modified the reciever; should be pure function")
+			t.Errorf("FromRegistry modified the receiver; should be pure function")
 		}
 		if registry.Subdir != "" {
 			t.Errorf("FromRegistry modified the given address; should be pure function")
@@ -400,7 +427,7 @@ func TestModuleSourceRemoteFromRegistry(t *testing.T) {
 		}
 		gotAddr := remote.FromRegistry(registry)
 		if remote.Subdir != "" {
-			t.Errorf("FromRegistry modified the reciever; should be pure function")
+			t.Errorf("FromRegistry modified the receiver; should be pure function")
 		}
 		if registry.Subdir != "bar" {
 			t.Errorf("FromRegistry modified the given address; should be pure function")
@@ -481,7 +508,7 @@ func TestParseModuleSourceRegistry(t *testing.T) {
 	// the user provided in the input, and so for backward compatibility
 	// we're continuing to do that here, at the expense of now making the
 	// "ForDisplay" output case-preserving where its predecessor in the
-	// old package wasn't. The main OpenTofu Registry at registry.terraform.io
+	// old package wasn't. The main OpenTofu Registry at registry.opentofu.org
 	// is itself case-insensitive anyway, so our case-preserving here is
 	// entirely for the benefit of existing third-party registry
 	// implementations that might be case-sensitive, which we must remain
@@ -496,25 +523,25 @@ func TestParseModuleSourceRegistry(t *testing.T) {
 	}{
 		"public registry": {
 			input:           `hashicorp/consul/aws`,
-			wantString:      `registry.terraform.io/hashicorp/consul/aws`,
+			wantString:      `registry.opentofu.org/hashicorp/consul/aws`,
 			wantForDisplay:  `hashicorp/consul/aws`,
 			wantForProtocol: `hashicorp/consul/aws`,
 		},
 		"public registry with subdir": {
 			input:           `hashicorp/consul/aws//foo`,
-			wantString:      `registry.terraform.io/hashicorp/consul/aws//foo`,
+			wantString:      `registry.opentofu.org/hashicorp/consul/aws//foo`,
 			wantForDisplay:  `hashicorp/consul/aws//foo`,
 			wantForProtocol: `hashicorp/consul/aws`,
 		},
 		"public registry using explicit hostname": {
-			input:           `registry.terraform.io/hashicorp/consul/aws`,
-			wantString:      `registry.terraform.io/hashicorp/consul/aws`,
+			input:           `registry.opentofu.org/hashicorp/consul/aws`,
+			wantString:      `registry.opentofu.org/hashicorp/consul/aws`,
 			wantForDisplay:  `hashicorp/consul/aws`,
 			wantForProtocol: `hashicorp/consul/aws`,
 		},
 		"public registry with mixed case names": {
 			input:           `HashiCorp/Consul/aws`,
-			wantString:      `registry.terraform.io/HashiCorp/Consul/aws`,
+			wantString:      `registry.opentofu.org/HashiCorp/Consul/aws`,
 			wantForDisplay:  `HashiCorp/Consul/aws`,
 			wantForProtocol: `HashiCorp/Consul/aws`,
 		},
@@ -630,4 +657,24 @@ func TestParseModuleSourceRegistry(t *testing.T) {
 			}
 		})
 	}
+}
+
+func testDataAbsolutePath() (absolutePath string, modulePackage string) {
+	absolutePath = "/tmp/foo/example"
+	modulePackage = "file:///tmp/foo/example"
+	if runtime.GOOS == "windows" {
+		absolutePath = "C:\\tmp\\foo\\example"
+		modulePackage = "C:\\tmp\\foo\\example"
+	}
+	return
+}
+
+func testDataAbsolutePathSubdir() (absolutePath string, modulePackage string) {
+	absolutePath = "/tmp/foo//example"
+	modulePackage = "file:///tmp/foo"
+	if runtime.GOOS == "windows" {
+		absolutePath = "C:\\tmp\\foo//example"
+		modulePackage = "C:\\tmp\\foo"
+	}
+	return
 }

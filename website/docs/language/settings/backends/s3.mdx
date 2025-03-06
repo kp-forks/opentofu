@@ -7,8 +7,9 @@ description: OpenTofu can store state remotely in S3 and lock that state with Dy
 
 Stores the state as a given key in a given bucket on
 [Amazon S3](https://aws.amazon.com/s3/).
-This backend also supports state locking and consistency checking via
-[Dynamo DB](https://aws.amazon.com/dynamodb/), which can be enabled by setting
+This backend supports multiple locking mechanisms. The preferred one is a native S3 locking via
+conditional writes with `If-None-Match` header. This can be enabled by setting `use_lockfile=true`.
+Another option is to use [Dynamo DB](https://aws.amazon.com/dynamodb/) locking, which can be enabled by setting
 the `dynamodb_table` field to an existing DynamoDB table name.
 A single DynamoDB table can be used to lock multiple remote state files. OpenTofu generates key names that include the values of the `bucket` and `key` variables.
 
@@ -16,6 +17,10 @@ A single DynamoDB table can be used to lock multiple remote state files. OpenTof
 It is highly recommended that you enable
 [Bucket Versioning](https://docs.aws.amazon.com/AmazonS3/latest/userguide/manage-versioning-examples.html)
 on the S3 bucket to allow for state recovery in the case of accidental deletions and human error.
+:::
+
+:::info
+For a smooth transition to the S3 locking, please read the [dedicated section](#s3-state-locking).
 :::
 
 ## Example Configuration
@@ -34,7 +39,7 @@ This assumes we have a bucket created called `mybucket`. The
 OpenTofu state is written to the key `path/to/my/key`.
 
 Note that for the access credentials we recommend using a
-[partial configuration](/docs/language/settings/backends/configuration#partial-configuration).
+[partial configuration](../../../language/settings/backends/configuration.mdx#partial-configuration).
 
 ### S3 Bucket Permissions
 
@@ -108,7 +113,7 @@ This is seen in the following AWS IAM Statement:
 ## Data Source Configuration
 
 To make use of the S3 remote state in another configuration, use the
-[`terraform_remote_state` data source](/docs/language/state/remote-state-data).
+[`terraform_remote_state` data source](../../../language/state/remote-state-data.mdx).
 
 ```hcl
 data "terraform_remote_state" "network" {
@@ -148,7 +153,7 @@ This backend requires the configuration of the AWS Region and S3 state storage. 
 ### Credentials and Shared Configuration
 
 :::danger Warning
-We recommend using environment variables to supply credentials and other sensitive data. If you use `-backend-config` or hardcode these values directly in your configuration, OpenTofu will include these values in both the `.terraform` subdirectory and in plan files. Refer to [Credentials and Sensitive Data](/docs/language/settings/backends/configuration#credentials-and-sensitive-data) for details.
+We recommend using environment variables to supply credentials and other sensitive data. If you use `-backend-config` or hardcode these values directly in your configuration, OpenTofu will include these values in both the `.terraform` subdirectory and in plan files. Refer to [Credentials and Sensitive Data](../../../language/settings/backends/configuration.mdx#credentials-and-sensitive-data) for details.
 :::
 
 The following configuration is required:
@@ -159,42 +164,188 @@ The following configuration is optional:
 
 * `access_key` - (Optional) AWS access key. If configured, must also configure `secret_key`. This can also be sourced from the `AWS_ACCESS_KEY_ID` environment variable, AWS shared credentials file (e.g. `~/.aws/credentials`), or AWS shared configuration file (e.g. `~/.aws/config`).
 * `secret_key` - (Optional) AWS access key. If configured, must also configure `access_key`. This can also be sourced from the `AWS_SECRET_ACCESS_KEY` environment variable, AWS shared credentials file (e.g. `~/.aws/credentials`), or AWS shared configuration file (e.g. `~/.aws/config`).
-* `iam_endpoint` - (Optional) Custom endpoint for the AWS Identity and Access Management (IAM) API. This can also be sourced from the `AWS_IAM_ENDPOINT` environment variable.
+* `iam_endpoint` - (Optional) **Deprecated** Custom endpoint for the AWS Identity and Access Management (IAM) API. This can also be sourced from the `AWS_IAM_ENDPOINT` environment variable.
 * `max_retries` - (Optional) The maximum number of times an AWS API request is retried on retryable failure. Defaults to 5.
+* `retry_mode` - (Optional) Specifies how retries are attempted. Valid values are `standard` and `adaptive`. This can also be sourced from the `AWS_RETRY_MODE` environment variable.
 * `profile` - (Optional) Name of AWS profile in AWS shared credentials file (e.g. `~/.aws/credentials`) or AWS shared configuration file (e.g. `~/.aws/config`) to use for credentials and/or configuration. This can also be sourced from the `AWS_PROFILE` environment variable.
-* `shared_credentials_file`  - (Optional) Path to the AWS shared credentials file. Defaults to `~/.aws/credentials`.
+* `shared_credentials_file`  - (Optional) **Deprecated** Path to the AWS shared credentials file. Defaults to `~/.aws/credentials`.
+* `shared_credentials_files`  - (Optional) List of paths to AWS shared credentials files. Defaults to `~/.aws/credentials`. This can also be sourced from the `AWS_SHARED_CREDENTIALS_FILE` environment variable.
+* `shared_config_files`  - (Optional) List of paths to AWS shared configuration files. Defaults to `~/.aws/config`. This can also be sourced from the `AWS_SHARED_CONFIG_FILE` environment variable.
+* `skip_s3_checksum` - (Optional) Do not include checksum in the input when uploading S3 Objects.
+  Useful for non AWS S3 APIs which do not support checksum validation.
 * `skip_credentials_validation` - (Optional) Skip credentials validation via the STS API.
 * `skip_region_validation` - (Optional) Skip validation of provided region name.
 * `skip_metadata_api_check` - (Optional) Skip usage of EC2 Metadata API.
-* `sts_endpoint` - (Optional) Custom endpoint for the AWS Security Token Service (STS) API. This can also be sourced from the `AWS_STS_ENDPOINT` environment variable.
+* `skip_requesting_account_id` - (Optional) Skip requesting the account ID. Useful for AWS API implementations that do not have the IAM, STS API, or metadata API.
+* `sts_endpoint` - (Optional) **Deprecated** Custom endpoint for the AWS Security Token Service (STS) API. This can also be sourced from the `AWS_STS_ENDPOINT` environment variable.
+* `sts_region` - (Optional) AWS region for STS. If unset, AWS will use the same region for STS as other non-STS operations.
 * `token` - (Optional) Multi-Factor Authentication (MFA) token. This can also be sourced from the `AWS_SESSION_TOKEN` environment variable.
+* `allowed_account_ids` (Optional): A list of permitted AWS account IDs to safeguard against accidental disruption of a live environment. This option conflicts with `forbidden_account_ids`.
+* `forbidden_account_ids` (Optional): A list of prohibited AWS account IDs to prevent unintentional disruption of a live environment. This option conflicts with `allowed_account_ids`.
+* `custom_ca_bundle` - File containing custom root and intermediate certificates. Can also be configured using the `AWS_CA_BUNDLE` environment variable.
+* `ec2_metadata_service_endpoint` - Address of the EC2 metadata service (IMDS) endpoint to use. This can also be sourced from the `AWS_EC2_METADATA_SERVICE_ENDPOINT` environment variable.
+* `ec2_metadata_service_endpoint_mode` - Mode to use in communicating with the metadata service. Valid values are `IPv4` and `IPv6`. This can also be sourced from the `AWS_EC2_METADATA_SERVICE_ENDPOINT_MODE` environment variable.
+* `http_proxy` - (Optional) The address of an HTTP proxy to use when accessing the AWS API. This can also be sourced from the `HTTP_PROXY` environment variable.
+* `https_proxy` - (Optional) The address of an HTTPS proxy to use when accessing the AWS API. This can also be sourced from the `HTTPS_PROXY` environment variable.
+* `no_proxy` - (Optional) Comma-separated values which specify hosts that should be excluded from proxying when accessing the AWS API. This can also be sourced from the `NO_PROXY` environment variable. Find more details [here](https://cs.opensource.google/go/x/net/+/refs/tags/v0.17.0:http/httpproxy/proxy.go;l=38-50).
+* `insecure` - (Optional) Explicitly allow the backend to perform "insecure" SSL requests; default is `false`.
+* `use_dualstack_endpoint` - (Optional) Resolve an endpoint with DualStack capability.
+* `use_fips_endpoint` - (Optional) Resolve an endpoint with FIPS capability.
+
+#### Customizing AWS API Endpoints
+
+The optional `endpoints` argument contains the following options:
+
+* `s3` - (Optional) Use this to set a custom endpoint URL for the AWS S3 API. This can also be sourced from the `AWS_ENDPOINT_URL_S3` environment variable or the deprecated environment variable `AWS_S3_ENDPOINT`.
+* `iam` - (Optional) Use this to set a custom endpoint URL for the AWS IAM API. This can also be sourced from the `AWS_ENDPOINT_URL_IAM` environment variable or the deprecated environment variable `AWS_IAM_ENDPOINT`.
+* `sts` - (Optional) Use this to set a custom endpoint URL for the AWS STS API. This can also be sourced from the `AWS_ENDPOINT_URL_STS` environment variable or the deprecated environment variable `AWS_STS_ENDPOINT`.
+* `dynamodb` - (Optional) Use this to set a custom endpoint URL for the AWS DynamoDB API. This can also be sourced from the `AWS_ENDPOINT_URL_DYNAMODB` environment variable or the deprecated environment variable `AWS_DYNAMODB_ENDPOINT`.
+
+```hcl
+terraform {
+  backend "s3" {
+    endpoints = {
+      dynamodb = "http://localhost:4569"
+      s3       = "http://localhost:4572"
+    }
+  }
+}
+```
 
 #### Assume Role Configuration
 
-The following configuration is optional:
+Assuming an IAM Role is optional and can be configured in two ways.
+The preferred way is to use the argument `assume_role`, as the other, the other method is deprecated.
+
+The argument `assume_role` contains the following arguments:
+
+* `role_arn` - (Required) The Amazon Resource Name (ARN) of the IAM Role to be assumed.
+* `duration` - (Optional) Specifies the validity period for individual credentials.
+  These credentials are automatically renewed, with the maximum renewal defined by the AWS account.
+  The duration should be specified in the format `<hours>h<minutes>m<seconds>s`, with each unit being optional.
+  For example, an hour and a half can be represented as `1h30m` or simply `90m`.
+  The duration must be within the range of 15 minutes (15m) to 12 hours (12h).
+* `external_id` - (Optional) An external identifier to use when assuming the role.
+* `policy` - (Optional) JSON representation of an IAM Policy that further restricts permissions for the IAM Role being assumed.
+* `policy_arns` - (Optional) A set of Amazon Resource Names (ARNs) for IAM Policies that further limit permissions for the assumed IAM Role.
+* `session_name` - (Optional) The session name to be used when assuming the role.
+* `tags` - (Optional) A map of tags to be associated with the assumed role session.
+* `transitive_tag_keys` - (Optional) A set of tag keys from the assumed role session to be passed to any subsequent sessions.
+
+The following arguments on the top level are deprecated:
 
 * `assume_role_duration_seconds` - (Optional) Number of seconds to restrict the assume role session duration.
+  Use `assume_role.duration` instead.
 * `assume_role_policy` - (Optional) IAM Policy JSON describing further restricting permissions for the IAM Role being assumed.
+  Use `assume_role.policy` instead.
 * `assume_role_policy_arns` - (Optional) Set of Amazon Resource Names (ARNs) of IAM Policies describing further restricting permissions for the IAM Role being assumed.
+  Use `assume_role.policy_arns` instead.
 * `assume_role_tags` - (Optional) Map of assume role session tags.
+  Use `assume_role.tags` instead.
 * `assume_role_transitive_tag_keys` - (Optional) Set of assume role session tag keys to pass to any subsequent sessions.
+  Use `assume_role.transitive_tag_keys` instead.
 * `external_id` - (Optional) External identifier to use when assuming the role.
+  Use `assume_role.external_id` instead.
 * `role_arn` - (Optional) Amazon Resource Name (ARN) of the IAM Role to assume.
+  Use `assume_role.role_arn` instead.
 * `session_name` - (Optional) Session name to use when assuming the role.
+  Use `assume_role.session_name` instead.
+
+```hcl
+terraform {
+  backend "s3" {
+    bucket = "mybucket"
+    key    = "my/key.tfstate"
+    region = "us-east-1"
+    assume_role = {
+      role_arn = "arn:aws:iam::ACCOUNT-ID:role/Opentofu"
+    }
+  }
+}
+```
+
+#### Assume Role With Web Identity Configuration
+
+The following `assume_role_with_web_identity` configuration block is optional:
+
+* `role_arn` - (Required) Amazon Resource Name (ARN) of the IAM Role to assume.
+Can also be set with the `AWS_ROLE_ARN` environment variable.
+* `duration` - (Optional) The duration individual credentials will be valid.
+Credentials are automatically renewed up to the maximum defined by the AWS account.
+Specified using the format `<hours>h<minutes>m<seconds>s` with any unit being optional.
+For example, an hour and a half can be specified as `1h30m` or `90m`.
+Must be between 15 minutes (15m) and 12 hours (12h).
+* `policy` - (Optional) IAM Policy JSON describing further restricting permissions for the IAM Role being assumed.
+* `policy_arns` - (Optional) Set of Amazon Resource Names (ARNs) of IAM Policies describing further restricting permissions for the IAM Role being assumed.
+* `session_name` - (Optional) Session name to use when assuming the role.
+Can also be set with the `AWS_ROLE_SESSION_NAME` environment variable.
+* `web_identity_token` - (Optional) The value of a web identity token from an OpenID Connect (OIDC) or OAuth provider.
+One of `web_identity_token` or `web_identity_token_file` is required.
+* `web_identity_token_file` - (Optional) File containing a web identity token from an OpenID Connect (OIDC) or OAuth provider.
+One of `web_identity_token_file` or `web_identity_token` is required.
+Can also be set with the `AWS_WEB_IDENTITY_TOKEN_FILE` environment variable.
+
+```hcl
+terraform {
+  backend "s3" {
+    bucket = "mybucket"
+    key    = "my/key.tfstate"
+    region = "us-east-1"
+
+    assume_role_with_web_identity = {
+      role_arn           = "arn:aws:iam::ACCOUNT-ID:role/Opentofu"
+      web_identity_token = "<token value>"
+    }
+  }
+}
+```
+
+It's possible to constrain the assumed role by providing a policy.
+
+```hcl
+terraform {
+  backend "s3" {
+    bucket = "mybucket"
+    key    = "my/key.tfstate"
+    region = "us-east-1"
+
+    assume_role_with_web_identity = {
+      role_arn           = "arn:aws:iam::ACCOUNT-ID:role/Opentofu"
+      web_identity_token = "<token value>"
+      policy             = <<-JSON
+			{
+				"Version": "2012-10-17",
+				"Statement": [
+					{
+						"Effect": "Allow",
+						"Action": "s3:*",
+						"Resource": [
+							"arn:aws:s3:::mybucket/*",
+							"arn:aws:s3:::mybucket"
+						]
+					}
+				]
+			}
+			JSON
+    }
+  }
+}
+```
 
 ### S3 State Storage
 
 The following configuration is required:
 
 * `bucket` - (Required) Name of the S3 Bucket.
-* `key` - (Required) Path to the state file inside the S3 Bucket. When using a non-default [workspace](/docs/language/state/workspaces), the state path will be `/workspace_key_prefix/workspace_name/key` (see also the `workspace_key_prefix` configuration).
+* `key` - (Required) Path to the state file inside the S3 Bucket. When using a non-default [workspace](../../../language/state/workspaces.mdx), the state path will be `/workspace_key_prefix/workspace_name/key` (see also the `workspace_key_prefix` configuration).
 
 The following configuration is optional:
 
 * `acl` - (Optional) [Canned ACL](https://docs.aws.amazon.com/AmazonS3/latest/userguide/acl-overview.html#canned-acl) to be applied to the state file.
 * `encrypt` - (Optional) Enable [server side encryption](https://docs.aws.amazon.com/AmazonS3/latest/userguide/UsingServerSideEncryption.html) of the state file.
-* `endpoint` - (Optional) Custom endpoint for the AWS S3 API. This can also be sourced from the `AWS_S3_ENDPOINT` environment variable.
-* `force_path_style` - (Optional) Enable path-style S3 URLs (`https://<HOST>/<BUCKET>` instead of `https://<BUCKET>.<HOST>`).
+* `endpoint` - (Optional) **Deprecated** Custom endpoint for the AWS S3 API. This can also be sourced from the `AWS_S3_ENDPOINT` environment variable.
+* `force_path_style` - (Optional) **Deprecated** Enable path-style S3 URLs (`https://<HOST>/<BUCKET>` instead of `https://<BUCKET>.<HOST>`). Use `use_path_style` instead.
+* `use_path_style` - (Optional) Enable path-style S3 URLs (`https://<HOST>/<BUCKET>` instead of `https://<BUCKET>.<HOST>`).
 * `kms_key_id` - (Optional) Amazon Resource Name (ARN) of a Key Management Service (KMS) Key to use for encrypting the state. Note that if this value is specified, OpenTofu will need `kms:Encrypt`, `kms:Decrypt` and `kms:GenerateDataKey` permissions on this KMS key.
 * `sse_customer_key` - (Optional) The key to use for encrypting state with [Server-Side Encryption with Customer-Provided Keys (SSE-C)](https://docs.aws.amazon.com/AmazonS3/latest/userguide/ServerSideEncryptionCustomerKeys.html). This is the base64-encoded value of the key, which must decode to 256 bits. This can also be sourced from the `AWS_SSE_CUSTOMER_KEY` environment variable, which is recommended due to the sensitivity of the value. Setting it inside an OpenTofu file will cause it to be persisted to disk in `terraform.tfstate`.
 * `workspace_key_prefix` - (Optional) Prefix applied to the state path inside the bucket. This is only relevant when using a non-default workspace. Defaults to `env:`.
@@ -203,8 +354,34 @@ The following configuration is optional:
 
 The following configuration is optional:
 
-* `dynamodb_endpoint` - (Optional) Custom endpoint for the AWS DynamoDB API. This can also be sourced from the `AWS_DYNAMODB_ENDPOINT` environment variable.
+* `dynamodb_endpoint` - (Optional) **Deprecated** Custom endpoint for the AWS DynamoDB API. This can also be sourced from the `AWS_DYNAMODB_ENDPOINT` environment variable.
 * `dynamodb_table` - (Optional) Name of DynamoDB Table to use for state locking and consistency. The table must have a partition key named `LockID` with type of `String`. If not configured, state locking will be disabled.
+
+### S3 State Locking
+
+* `use_lockfile` - (Optional) Enable locking directly into the configured bucket for the state.
+
+To migrate from DynamoDB to S3 locking, the following steps can be followed:
+1. The new attribute `use_lockfile=true` can be added alongside `dynamodb_table`:
+   * With both attributes specified, OpenTofu will try to acquire the lock first in S3 and if successful, will try to acquire the lock in DynamoDB. In this case, the lock will be considered acquired only when both (S3 and DynamoDB) locks were acquired successfully.
+   * Later, after a baking period with both locking mechanisms enabled, if no issues encountered, remove the `dynamodb_table` attribute. Now, you are solely on the S3 locking.
+   * **Info:** Keeping both locking mechanisms enabled, ensures that nobody will acquire the lock regardless of having or not the latest configuration.
+2. The new attribute `use_lockfile=true` can be added and `dynamodb_table` removed:
+   * This will switch from DynamoDB to S3 locking. **Caution:** when the updated configuration is executed from multiple places (multiple machines, pipelines on PRs, etc), you might get into issues where one outdated copy of the configuration is using DynamoDB locking and the one updated is using S3 locking. This could end up in concurrent access on the same state file.
+   * Once the state is updated by using this approach, the state digest that OpenTofu was storing in DynamoDB (for data consistency checks) will get stale. If you wish to go back to DynamoDB locking, **the old digest needs to be cleaned up manually**.
+
+:::note
+Remember, any changes to the `backend` block will require to run `tofu init -reconfigure`.
+:::
+
+:::note
+As mentioned in the beginning of this page, OpenTofu recommends to have versioning enabled on the S3 bucket where state file(s) are stored.
+By setting `use_lockfile=true`, acquiring and releasing locks will add a good amount of writes and reads to the bucket.
+Therefore, for a versioning-enabled bucket, the number of versions for that object could grow significantly.
+Even though the cost should be negligible for the locking objects, a lifecycle configuration of the S3 bucket to limit the number of versions of an object would be advised.
+:::
+
+When it comes to the workspace usage, the S3 locking will behave normally, storing the lock file right next to its related state object.
 
 ## Multi-account AWS Architecture
 
@@ -219,7 +396,7 @@ The S3 backend can be used in a number of different ways that make different
 tradeoffs between convenience, security, and isolation in such an organization.
 This section describes one such approach that aims to find a good compromise
 between these tradeoffs, allowing use of
-[OpenTofu's workspaces feature](/docs/language/state/workspaces) to switch
+[OpenTofu's workspaces feature](../../../language/state/workspaces.mdx) to switch
 conveniently between multiple isolated deployments of the same configuration.
 
 Use this section as a starting-point for your approach, but note that
@@ -327,7 +504,7 @@ provider "aws" {
 
 If workspace IAM roles are centrally managed and shared across many separate
 OpenTofu configurations, the role ARNs could also be obtained via a data
-source such as [`terraform_remote_state`](/docs/language/state/remote-state-data)
+source such as [`terraform_remote_state`](../../../language/state/remote-state-data.mdx)
 to avoid repeating these values.
 
 ### Creating and Selecting Workspaces

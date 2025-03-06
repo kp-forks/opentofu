@@ -1,4 +1,6 @@
-// Copyright (c) HashiCorp, Inc.
+// Copyright (c) The OpenTofu Authors
+// SPDX-License-Identifier: MPL-2.0
+// Copyright (c) 2023 HashiCorp, Inc.
 // SPDX-License-Identifier: MPL-2.0
 
 package command
@@ -12,7 +14,7 @@ const failedToLoadSchemasMessage = `
 Warning: Failed to update data for external integrations
 
 OpenTofu was unable to generate a description of the updated
-state for use with external integrations in Terraform Cloud.
+state for use with external integrations in the cloud backend.
 Any integrations configured for this workspace which depend on
 information from the state may not work correctly when using the
 result of this action.
